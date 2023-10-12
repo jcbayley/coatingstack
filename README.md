@@ -1,0 +1,1 @@
+This repo is a place to contain algorithms to test whether we can optimally find an arrangement of coatings that optimises quantities such as reflectivity, absorbtion, etc
