@@ -51,7 +51,7 @@ def make_layers(n_layers):
     return material_order
 
 
-def run_search(n_iterations, n_layers):
+def run_random_search(n_iterations, n_layers):
     """_summary_
 
     Args:
@@ -79,5 +79,5 @@ def run_search(n_iterations, n_layers):
 
 if __name__ == "__main__":
 
-    loss, fl = run_search(100, 10)
+    loss, fl = run_random_search(100, 10)
     print("final", loss, fl)
