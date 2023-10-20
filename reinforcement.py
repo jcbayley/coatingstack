@@ -13,13 +13,16 @@ Transition = namedtuple('Transition',
 
 class Environment():
 
-    def __init__(self, max_layers, min_thickness, max_thickness, materials, variable_layers=False):
+    def __init__(self, max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False):
         self.variable_layers = variable_layers
         self.max_layers = max_layers
+        self.thickness_options = thickness_options
         self.min_thickness = min_thickness
         self.max_thickness = max_thickness
         self.materials = materials
         self.n_materials = len(materials)
+        self.n_thickness = len(self.thickness_options)
+        self.n_actions = self.max_layers*self.n_materials*self.n_thickness
 
         # state space size is index for each material (onehot encoded) plus thickness of each material
         self.state_space_size = self.max_layers*self.n_materials + self.max_layers
@@ -59,19 +62,28 @@ class Environment():
 
         return torch.from_numpy(np.array(layers))
     
+    def action_onehot_to_position(self, position):
+        repos = position.reshape(self.max_layers, self.n_materials, self.n_thickness)
+        actionind = np.argmax(repos)
+        actions = np.unravel_index(actionind, repos.shape)
+        # should give 33 numbers (which layer, which material, which thickness change)
+
+        return actions
+    
+    def numpy_onehot(self, numpy_int, num_classes):
+        onehot = torch.nn.functional.one_hot(torch.from_numpy(np.array(numpy_int)), num_classes=num_classes)
+        return onehot
+        
     def sample_action_space(self, ):
         """sample from the action space
 
         Returns:
             _type_: _description_
         """
-        layer = torch.nn.functional.one_hot(torch.from_numpy(np.array(np.random.randint(0,self.max_layers))), num_classes=self.max_layers)
 
-        material_change = torch.nn.functional.one_hot(torch.from_numpy(np.array(np.random.randint(self.n_materials))), num_classes=self.n_materials)
-        thickness_range = (self.max_thickness - self.min_thickness)/60
-        thickness_change = np.random.uniform(-thickness_range, thickness_range)
-        #print(layer, material_change, thickness_change)
-        return np.concatenate([layer, material_change, [thickness_change]])
+        action = self.numpy_onehot(np.random.randint(0,self.n_actions), num_classes=self.n_actions)
+        #action = np.random.randint(0,self.n_actions)
+        return action
 
     def compute_reward(self,state):
         """_summary_
@@ -90,7 +102,7 @@ class Environment():
                 current_material = self.materials[torch.argmax(state[i][1:]).item()]
                 last_thickness = state[i-1][0]
                 current_thickness = state[i][0]
-                refract_diff = current_material["n"]/current_thickness - last_material["n"]/last_thickness
+                refract_diff = current_material["n"] - current_thickness - last_material["n"] + last_thickness
 
                 #print("rdiff", refract_diff)
                 reward += refract_diff
@@ -107,11 +119,15 @@ class Environment():
             _type_: _description_
         """
  
-        layer = torch.argmax(action[:,:self.max_layers]).item()
-        material = action[:,self.max_layers:self.max_layers+self.n_materials]
-        thickness_change = action[:,self.max_layers+self.n_materials:].item()
-        current_states[:,layer][0] += thickness_change
-        current_states[:,layer][1:] = material
+        actions = self.action_onehot_to_position(action)
+        #layer = torch.argmax(action[:,:self.max_layers]).item()
+        layer = actions[0].item()
+        material = self.numpy_onehot(actions[1], num_classes=self.n_materials)
+        thickness_change = self.thickness_options[actions[2].item()]
+        #material = action[:,self.max_layers:self.max_layers+self.n_materials]
+        #thickness_change = action[:,self.max_layers+self.n_materials:].item()
+        current_states[layer][0] += thickness_change
+        current_states[layer][1:] = material
 
         return current_states
 
@@ -125,7 +141,7 @@ class Environment():
         """
         
         terminated = False
-        if torch.any(action[:,2] < self.min_thickness) or torch.any(action[:,2] > self.max_thickness):
+        if torch.any((self.current_state[:,0] - action[:,0]) < self.min_thickness) or torch.any((self.current_state[:,0] + action[:,2]) > self.max_thickness):
             print("out of thickness bounds")
             terminated = True
         
@@ -155,23 +171,18 @@ class ReplayMemory(object):
 
 class DQN(torch.nn.Module):
 
-    def __init__(self, n_observations,  n_material, n_layers):
+    def __init__(self, n_observations,  n_actions):
         super(DQN, self).__init__()
         self.layer1 = torch.nn.Linear(n_observations, 128)
         self.layer2 = torch.nn.Linear(128, 128)
-        self.material_out = torch.nn.Linear(128, n_material)
-        self.layer_out = torch.nn.Linear(128, n_layers)
-        self.thickness_out = torch.nn.Linear(128, 1)
+        self.out_layer = torch.nn.Linear(128, n_actions)
 
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
     def forward(self, x):
         x = torch.nn.functional.relu(self.layer1(x))
         x = torch.nn.functional.relu(self.layer2(x))
-        siglayers = torch.nn.functional.softmax(self.material_out(x))
-        sigmaterial = torch.nn.functional.softmax(self.layer_out(x))
-        thick = self.thickness_out(x)
-        x = torch.cat([thick, sigmaterial, siglayers], dim=1)
+        x = self.out_layer(x)
         return x
 
 def select_action(state, steps_done, env):
@@ -195,9 +206,12 @@ def select_action(state, steps_done, env):
             # t.max(1) will return the largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            return policy_net(torch.flatten(state, start_dim=1))#.max(1)[1].view(1, 1)
+            return policy_net(torch.flatten(state, start_dim=1))#.max(1)#[1].view(1, 1)
     else:
-        return torch.tensor([env.sample_action_space()], device=device, dtype=torch.long)
+        action = env.sample_action_space()
+        #print([action])
+        return action.unsqueeze(0).to(device).to(torch.long)
+        #return torch.tensor([action], device=device, dtype=torch.long)
 
 
 def optimize_model(memory, batch_size, policy_net, target_net, optimiser):
@@ -231,7 +245,8 @@ def optimize_model(memory, batch_size, policy_net, target_net, optimiser):
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # columns of actions taken. These are the actions which would've been taken
     # for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
+
+    state_action_values = policy_net(state_batch.flatten(start_dim=1))#.gather(1, action_batch)
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based
@@ -240,14 +255,14 @@ def optimize_model(memory, batch_size, policy_net, target_net, optimiser):
     # state value or 0 in case the state was final.
     next_state_values = torch.zeros(batch_size, device=device)
     with torch.no_grad():
-        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
+        next_state_values[non_final_mask] = target_net(non_final_next_states.flatten(start_dim=1)).max(1)[0]
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
     # Compute Huber loss
     criterion = torch.nn.SmoothL1Loss()
     loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-    print("loss", loss)
+    print("loss", loss.item())
     # Optimize the model
     optimiser.zero_grad()
     loss.backward()
@@ -263,12 +278,12 @@ if __name__ == "__main__":
     EPS_END = 0.05
     EPS_DECAY = 1000
     TAU = 0.005
-    LR = 1e-4
+    LR = 1e-5
 
     device = "cpu"
 
     n_layers = 3
-    num_episodes = 10
+    num_episodes = 1000
     min_thickness = 1
     max_thickness = 4
 
@@ -278,7 +293,9 @@ if __name__ == "__main__":
         2:{"n": 5},
     }
 
-    env = Environment(n_layers, min_thickness, max_thickness, materials,)
+    thickness_options = [-0.1,-0.01,0.01,0.1]
+
+    env = Environment(n_layers, min_thickness, max_thickness, materials, thickness_options=thickness_options)
 
     # Get the number of state observations
     state = env.reset()
@@ -286,10 +303,11 @@ if __name__ == "__main__":
 
     # define number of actions to be made
     #  choose thickness, choose layer, then choose material (onehot)
-    n_actions = 1 + env.max_layers + len(materials)
+    n_actions = env.n_actions
+    #n_actions = 1 + env.max_layers + len(materials)
 
-    policy_net = DQN(n_observations, env.max_layers, len(materials)).to(device)
-    target_net = DQN(n_observations, env.max_layers, len(materials)).to(device)
+    policy_net = DQN(n_observations, n_actions).to(device)
+    target_net = DQN(n_observations, n_actions).to(device)
     target_net.load_state_dict(policy_net.state_dict())
 
     optimiser = torch.optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
@@ -297,19 +315,21 @@ if __name__ == "__main__":
 
     truncated = 200
 
+    rewards = []
     for i_episode in range(num_episodes):
         # Initialize the environment and get it's state
         print(f"Episode: {i_episode}")
         state = env.reset()
         state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-        print(len(memory))
+        #print(len(memory))
         for t in count():
             action = select_action(state, t, env)
             #print(np.shape(action))
             observation, reward, terminated = env.step(action)
+            rewards.append(reward)
             reward = torch.tensor([reward], device=device)
             done = terminated or (t > truncated)
-
+            
             if terminated:
                 next_state = None
             else:
@@ -336,3 +356,9 @@ if __name__ == "__main__":
                 #episode_durations.append(t + 1)
                 # plot_durations()
                 break
+        if i_episode == num_episodes - 1:
+            print(state)
+
+    fig, ax = plt.subplots()
+    ax.plot(rewards)
+    fig.savefig("./rewards.png")
