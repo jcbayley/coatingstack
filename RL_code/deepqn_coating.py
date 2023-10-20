@@ -60,7 +60,14 @@ class Environment():
         return torch.from_numpy(np.array(layers))
     
     def action_onehot_to_position(self, action):
+        """change from integer action to a list of 3 indices according the the 3 actions
 
+        Args:
+            action (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         onehot_action = torch.nn.functional.one_hot(torch.from_numpy(np.array([action])), num_classes=self.n_actions)
         repos = onehot_action.reshape(self.max_layers, self.n_materials, self.n_thickness)
         actionind = np.argmax(repos)
@@ -70,7 +77,14 @@ class Environment():
         return actions
     
     def get_actions(self, action):
+        """get the physical actions from the indices of the action
 
+        Args:
+            action (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         actions = self.action_onehot_to_position(action)
     
         layer = actions[0].item()
