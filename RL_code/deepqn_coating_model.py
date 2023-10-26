@@ -127,10 +127,10 @@ class Environment():
             current_thickness = state[i][0]
             if current_thickness > self.max_thickness:
                 #refract_diff = -10*np.abs(current_thickness - self.max_thickness)
-                refract_diff = -1#self.max_thickness
+                refract_diff = -10#self.max_thickness
             elif current_thickness < self.min_thickness:
                 #refract_diff = -10*np.abs(current_thickness - self.min_thickness)
-                refract_diff = -1#self.min_thickness
+                refract_diff = -10#self.min_thickness
             else:
                 refract_diff = current_material["n"] + np.exp(-(current_thickness - 6)**2/0.5) #+ last_material["n"]*last_thickness
             #print("rdiff", refract_diff)
@@ -150,9 +150,7 @@ class Environment():
 
         new_value = self.compute_state_value(new_state) 
         old_value = self.compute_state_value(old_state)
-        reward_diff = new_value - old_value - 0.01
-        if reward_diff < 0:
-            reward_diff = -1
+        reward_diff = new_value - old_value 
 
         return reward_diff, new_value
     
@@ -371,7 +369,7 @@ class Agent(object):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./test_5_allopt"
+    root_dir = "./test_3_allopt"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -386,12 +384,7 @@ if __name__ == '__main__':
 
     thickness_options = [-1,-0.1,0.0,0.1,1]
 
-    env = Environment(
-        n_layers, 
-        min_thickness, 
-        max_thickness, 
-        materials, 
-        thickness_options=thickness_options)
+    env = Environment(n_layers, min_thickness, max_thickness, materials, thickness_options=thickness_options)
 
     # Get the number of state observations
     state = env.reset()
@@ -404,16 +397,9 @@ if __name__ == '__main__':
     num_games = 2000
     load_checkpoint = False
 
-    agent = Agent(gamma=0.9, 
-                  epsilon=1.0, 
-                  alpha=1e-5,
-                  input_dims=[n_observations], 
-                  n_actions=n_actions, 
-                  mem_size=100000, 
-                  eps_min=0.01,
-                  batch_size=128, 
-                  eps_dec=1e-4,   # decay rate of random steps
-                  replace=20,    # how often to replace target with eval network
+    agent = Agent(gamma=0.99, epsilon=1.0, alpha=1e-5,
+                  input_dims=[n_observations], n_actions=n_actions, mem_size=100000, eps_min=0.01,
+                  batch_size=128, eps_dec=1e-4, replace=100,
                   chkpt_dir=root_dir)
 
     if load_checkpoint:
@@ -422,7 +408,6 @@ if __name__ == '__main__':
     filename = os.path.join(root_dir,'coating.png')
     scores = []
     eps_history = []
-    training_reward_iter = []
     n_steps = 0
     final_state = None
     n_mean_calc = 100
@@ -437,10 +422,9 @@ if __name__ == '__main__':
             observation_, reward, done, new_reward = env.step(action)
             n_steps += 1
             runsteps += 1
-            reward_window.append(new_reward)
             # Set the episode to end if the reward is within 1 std of the last N
             score += reward #* 1./(runsteps)
-            if runsteps > 1000:
+            if runsteps > 2000:
                 done=True
             """
             if runsteps < n_mean_calc:
@@ -460,7 +444,7 @@ if __name__ == '__main__':
 
             final_state = observation
 
-        training_reward_iter.append(reward_window)
+
         scores.append(score)
         avg_score = np.mean(scores[max(0, i-100):(i+1)])
         if i % 10 == 0:
@@ -472,18 +456,11 @@ if __name__ == '__main__':
 
         eps_history.append(agent.epsilon)
 
-    fig, ax = plt.subplots()
-    ax.plot(training_reward_iter[10][:100])
-    ax.plot(training_reward_iter[int(0.5*len(training_reward_iter))][:100])
-    ax.plot(training_reward_iter[-10][:100])
-
-    fig.savefig(os.path.join(root_dir, "training_reward_evolution.png"))
-
     print("Final state")
     print(final_state)
 
     num_test = 3
-    nsteps = 5000
+    nsteps = 20000
     output_observations = np.zeros((num_test, *np.shape(final_state)))
     output_scores = np.zeros((num_test, 1))
     output_values = np.zeros((num_test, 1))
