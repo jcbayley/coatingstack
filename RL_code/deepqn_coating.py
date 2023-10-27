@@ -371,7 +371,7 @@ class Agent(object):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./test_5_allopt"
+    root_dir = "./test_7_allopt"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -401,7 +401,7 @@ if __name__ == '__main__':
     #  choose thickness, choose layer, then choose material (onehot)
     n_actions = env.n_actions
 
-    num_games = 2000
+    num_games = 4000
     load_checkpoint = False
 
     agent = Agent(gamma=0.9, 
@@ -413,7 +413,7 @@ if __name__ == '__main__':
                   eps_min=0.01,
                   batch_size=128, 
                   eps_dec=1e-4,   # decay rate of random steps
-                  replace=20,    # how often to replace target with eval network
+                  replace=100,    # how often to replace target with eval network
                   chkpt_dir=root_dir)
 
     if load_checkpoint:
@@ -473,9 +473,16 @@ if __name__ == '__main__':
         eps_history.append(agent.epsilon)
 
     fig, ax = plt.subplots()
-    ax.plot(training_reward_iter[10][:100])
-    ax.plot(training_reward_iter[int(0.5*len(training_reward_iter))][:100])
-    ax.plot(training_reward_iter[-10][:100])
+    for ind in [10, int(0.5*len(training_reward_iter)), len(training_reward_iter)-10]:
+        ax.plot(training_reward_iter[ind][:100], label=f"episode: {ind}")
+    ax.legend()
+
+    fig.savefig(os.path.join(root_dir, "training_reward_evolution_zoomstart.png"))
+
+    fig, ax = plt.subplots()
+    for ind in [10, int(0.5*len(training_reward_iter)), len(training_reward_iter)-10]:
+        ax.plot(training_reward_iter[ind], label=f"episode: {ind}")
+    ax.legend()
 
     fig.savefig(os.path.join(root_dir, "training_reward_evolution.png"))
 
