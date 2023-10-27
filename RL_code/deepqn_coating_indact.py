@@ -28,7 +28,7 @@ class Environment(gym.Env):
 
         self.length = 0
         self.current_state = self.sample_state_space()
-        self.current_reward = self.compute_reward(self.current_state)
+        self.current_reward = self.compute_state_value(self.current_state)
 
     def reset(self,):
         """reset the state space and length
@@ -98,7 +98,7 @@ class Environment(gym.Env):
         action = np.random.randint(0,self.n_actions)
         return action
 
-    def compute_reward(self,state):
+    def compute_state_value(self,state):
         """_summary_
 
         Args:
@@ -113,14 +113,15 @@ class Environment(gym.Env):
             current_material = self.materials[torch.argmax(state[i][1:]).item()]
             last_thickness = state[i-1][0]
             current_thickness = state[i][0]
+            """
             if current_thickness > self.max_thickness:
                 #refract_diff = -10*np.abs(current_thickness - self.max_thickness)
                 refract_diff = -10#self.max_thickness
             elif current_thickness < self.min_thickness:
                 #refract_diff = -10*np.abs(current_thickness - self.min_thickness)
                 refract_diff = -10#self.min_thickness
-            else:
-                refract_diff = current_material["n"] + np.exp(-(current_thickness - 6)**2/0.5) #+ last_material["n"]*last_thickness
+            """
+            refract_diff = current_material["n"] + np.exp(-(current_thickness - 6)**2/0.5) #+ last_material["n"]*last_thickness
 
             #print("rdiff", refract_diff)
             rewards.append(refract_diff)
@@ -165,18 +166,19 @@ class Environment(gym.Env):
         actions = self.get_actions(action)
         new_state = self.get_new_state(torch.clone(self.current_state), actions)
 
+        new_reward = self.compute_state_value(new_state) 
         terminated = False
         #print(torch.any((self.current_state[0] + actions[2]) < self.min_thickness))
         if torch.any((new_state[:,0]) < self.min_thickness) or torch.any((new_state[:,0]) > self.max_thickness):
             #print("out of thickness bounds")
             terminated = True
-            #pass
+            reward = -10
+            new_reward = -10
             #reward = -1000000
             #new_state = self.current_state
-
-      
-        new_reward = self.compute_reward(new_state) 
-        reward = new_reward - self.current_reward - 1
+        else:
+            reward = new_reward - self.current_reward - 0.5
+    
 
         self.length += 1
 
@@ -346,7 +348,7 @@ class Agent(object):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./test_2_sepact"
+    root_dir = "./test_7_sepact"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -374,9 +376,9 @@ if __name__ == '__main__':
     num_games = 4000
     load_checkpoint = False
 
-    agent = Agent(gamma=0.9, epsilon=1.0, alpha=5e-6,
+    agent = Agent(gamma=0.99, epsilon=1.0, alpha=6e-5,
                   input_dims=[n_observations], n_actions=n_actions, mem_size=100000, eps_min=0.01,
-                  batch_size=64, eps_dec=1e-5, replace=20,
+                  batch_size=64, eps_dec=1e-6, replace=100,
                   chkpt_dir=root_dir)
 
     if load_checkpoint:
@@ -437,45 +439,62 @@ if __name__ == '__main__':
         eps_history.append(agent.epsilon)
 
     fig, ax = plt.subplots()
-    ax.plot(training_reward_iter[-1])
-    ax.plot(training_reward_iter[-10])
-    ax.plot(training_reward_iter[-100])
+    for ind in [10, int(0.5*len(training_reward_iter)), len(training_reward_iter)-10]:
+        ax.plot(training_reward_iter[ind][:100], label=f"episode: {ind}")
+    ax.legend()
+
+    fig.savefig(os.path.join(root_dir, "training_reward_evolution_zoomstart.png"))
+
+    fig, ax = plt.subplots()
+    for ind in [10, int(0.5*len(training_reward_iter)), len(training_reward_iter)-10]:
+        ax.plot(training_reward_iter[ind], label=f"episode: {ind}")
+    ax.legend()
 
     fig.savefig(os.path.join(root_dir, "training_reward_evolution.png"))
 
     print("Final state")
     print(final_state)
 
-    num_test = 3
-    nsteps = 1000
+    num_test = 5
+    nsteps = 500
     output_observations = np.zeros((num_test, *np.shape(final_state)))
     output_scores = np.zeros((num_test, 1))
-    score_evolutions = np.zeros((num_test, nsteps))
+    score_evolutions = np.zeros((num_test, nsteps))*np.nan
+    top_states = np.zeros((num_test, *np.shape(final_state)))
+    max_score = -np.inf
     for i in range(num_test):
 
         observation = env.reset()
-        print(f"Obs: {i}", observation)
+        #print(f"Obs: {i}", observation)
         done = False
         step_ind = 0
         score = 0
-     
+        top_state = None
         while not done:
             #print("step")
             action = agent.choose_action(observation)
-            observation_, reward, done = env.step(action, verbose=False)
+            observation_, reward, done, new_reward = env.step(action, verbose=False)
         
             #print(f"Reward: {reward}")
             score += reward
-            score_evolutions[i, step_ind] = reward
+            score_evolutions[i, step_ind] = new_reward
+            if new_reward > max_score:
+                top_state = observation_
+                max_score = new_reward
+                print(max_score)
+                print(top_state)
             step_ind += 1
             if step_ind >= nsteps:
                 done = True
         print("Nsteps", step_ind)
-        
+        top_states[i] = top_state
         output_observations[i] = observation_
         output_scores[i] = score
 
+    print("----------------")
     print(output_observations)
+    print("----------------")
+    print(top_states)
     print(output_scores)
 
     fig, ax = plt.subplots()
