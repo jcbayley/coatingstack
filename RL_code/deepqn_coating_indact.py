@@ -172,12 +172,12 @@ class Environment(gym.Env):
         if torch.any((new_state[:,0]) < self.min_thickness) or torch.any((new_state[:,0]) > self.max_thickness):
             #print("out of thickness bounds")
             terminated = True
-            reward = -10
-            new_reward = -10
+            reward = -100
+            new_reward = -100
             #reward = -1000000
             #new_state = self.current_state
         else:
-            reward = new_reward - self.current_reward - 0.5
+            reward = 0.1*(new_reward - self.current_reward) - 0.5
     
 
         self.length += 1
@@ -348,7 +348,7 @@ class Agent(object):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./test_7_sepact"
+    root_dir = "./test_8_sepact"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -373,12 +373,12 @@ if __name__ == '__main__':
     #  choose thickness, choose layer, then choose material (onehot)
     n_actions = env.n_actions
 
-    num_games = 4000
+    num_games = 6000
     load_checkpoint = False
 
     agent = Agent(gamma=0.99, epsilon=1.0, alpha=6e-5,
                   input_dims=[n_observations], n_actions=n_actions, mem_size=100000, eps_min=0.01,
-                  batch_size=64, eps_dec=1e-6, replace=100,
+                  batch_size=64, eps_dec=3e-6, replace=100,
                   chkpt_dir=root_dir)
 
     if load_checkpoint:
