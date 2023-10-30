@@ -150,7 +150,7 @@ class Environment():
 
         new_value = self.compute_state_value(new_state) 
         old_value = self.compute_state_value(old_state)
-        reward_diff = new_value - old_value - 0.01
+        reward_diff = new_value - old_value - 0.5
         if reward_diff < 0:
             reward_diff = -1
 
@@ -371,7 +371,7 @@ class Agent(object):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./test_7_allopt"
+    root_dir = "./test_8_allopt"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 

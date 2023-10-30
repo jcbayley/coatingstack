@@ -111,38 +111,6 @@ class Environment():
         action = np.random.randint(0,self.n_actions)
         return action
 
-    def old_compute_state_value(self,state):
-        """_summary_
-
-        Args:
-            state (_type_): _description_
-        """
-
-        reward = 0
-        rewards = []
-        #print(len(state))
-        for i,layer in enumerate(state):
-            if i == 0:
-                continue
-            last_material = self.materials[np.argmax(state[i-1][1:]) + 1]
-            current_material = self.materials[np.argmax(state[i][1:]) + 1]
-            last_thickness = state[i-1][0]
-            current_thickness = state[i][0]
-            if current_thickness > self.max_thickness or last_thickness > self.max_thickness:
-                #refract_diff = -10*np.abs(current_thickness - self.max_thickness)
-                refract_diff = -100#self.max_thickness
-            elif current_thickness < self.min_thickness or last_thickness < self.min_thickness:
-                #refract_diff = -10*np.abs(current_thickness - self.min_thickness)
-                refract_diff = -100#self.min_thickness
-            else:
-                #refract_diff = current_material["n"]*np.exp(-(current_thickness - 6)**2/0.5) #+ last_material["n"]*last_thickness
-                refract_diff = current_material["n"]/current_thickness - last_material["n"]/last_thickness
-            #print("rdiff", refract_diff)
-            rewards.append(refract_diff)
-            reward += refract_diff
-
-       
-        return reward
     
     def compute_state_value(self, state, material_sub=1, lambda_=1, f=1, wBeam=1, Temp=1):
 
@@ -152,7 +120,6 @@ class Environment():
         ySub = self.materials[material_sub]['Y']
         pratSub = self.materials[material_sub]['prat']
 
-        # Initialize vectors of material properties
         # Initialize vectors of material properties
         nLayer = np.zeros(self.max_layers)
         aLayer = np.zeros(self.max_layers)
@@ -180,7 +147,8 @@ class Environment():
         #print(rho)
         #print(SbrZ)
         #sys.exit()
-        stat = np.abs(rCoat) + absCoat + np.mean(SbrZ) + np.mean(StoZ) + np.mean(SteZ) 
+        stat = np.abs(rCoat) - np.mean(SbrZ)*1e37
+        #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
             return -50
         else:
@@ -265,13 +233,14 @@ class Environment():
 
 class StatePool():
 
-    def __init__(self, environment, n_states=50, n_keep_states = 10):
+    def __init__(self, environment, n_states=50, states_fraction_keep = 0.1, fraction_random_add=0.0):
         self.environment = environment
         self.n_states = n_states
-        self.n_keep_states = n_keep_states
-        if self.n_states % self.n_keep_states != 0:
-            raise Exception(f"keep states must divide into n states")
-        self.fraction_keep = int(self.n_states/self.n_keep_states)
+        self.states_fraction_keep = states_fraction_keep
+        self.fraction_random_add = fraction_random_add
+        #if self.n_states % self.n_keep_states != 0:
+        #    raise Exception(f"keep states must divide into n states")
+  
         self.current_states = self.get_new_states(self.n_states)
 
     def order_states(self, ):
@@ -290,13 +259,35 @@ class StatePool():
         actions = self.environment.get_actions(action)
         new_state = self.environment.get_new_state(state, actions)
         return new_state
+    
+    def state_crossover(self, states):
+        n_states, n_layers, n_features = np.shape(states)
+        # creates indicies for each of the example states and shuffles them
+        data_inds = np.arange(n_states)
+        num_swaps = 3
+        nswitch = int(n_states/2)
+        for i in range(num_swaps):
+            np.random.shuffle(data_inds)
+            # define that half of states will switch a layer with another state
+            ninds_switch_from = data_inds[:nswitch]
+            ninds_switch_to = data_inds[nswitch:]
+            layers = np.random.randint(n_layers, size=nswitch)
+            states[ninds_switch_from, layers] = states[ninds_switch_to, layers]
+
+        return states
 
     def evolve_step(self,):
 
         sorted_state_values = self.order_states()
-        top_state_values = sorted_state_values[:self.n_keep_states]
+        n_keep_states = int(self.states_fraction_keep * self.n_states)
+        top_state_values = sorted_state_values[:n_keep_states]
         top_states = self.current_states[top_state_values[:,0].astype(int)]
-        self.current_states = np.tile(top_states, (self.fraction_keep, 1, 1))
+        self.current_states = np.tile(top_states, (np.ceil(self.n_states/n_keep_states).astype(int), 1, 1))[:self.n_states]
+        self.current_states = self.state_crossover(self.current_states)
+        
+        if self.fraction_random_add != 0 :
+            num_random_add = int(self.n_states * self.fraction_random_add())
+            self.current_states[-num_random_add:] = self.get_new_states(num_random_add)
         for i in range(self.n_states):
             self.current_states[i] = self.evolve_state(self.current_states[i])
 
@@ -309,19 +300,21 @@ class StatePool():
         return np.array(states)
     
 
+def test_outputs():
+    pass
 
 
 
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./genetic_1"
+    root_dir = "./genetic_real_2"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
     n_layers = 5
-    min_thickness = 0.1
-    max_thickness = 1
+    min_thickness = 0.01
+    max_thickness = 2
 
     materials = {
         1: {
@@ -347,10 +340,22 @@ if __name__ == '__main__':
             'Y': 140e9,
             'prat': 0.23,
             'phiM': 2.44e-4
+        },
+        3: {
+            'name': 'nothing',
+            'n': 2.37,
+            'a': 2,
+            'alpha': 3.6e-6,
+            'beta': 14e-6,
+            'kappa': 33,
+            'C': 2.1e6,
+            'Y': 140e9,
+            'prat': 0.43,
+            'phiM': 2.44e-4
         }
     }
 
-    thickness_options = [-1,-0.1,0.0,0.1,1]
+    thickness_options = [-0.1,-0.01,-0.001,0.0,0.001,0.01,0.1]
 
     env = Environment(
         n_layers, 
@@ -359,8 +364,8 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 300
-    statepool = StatePool(env, n_states=500, n_keep_states = 50)
+    num_iterations = 3000
+    statepool = StatePool(env, n_states=3000, states_fraction_keep = 0.4)
 
 
 
@@ -371,11 +376,12 @@ if __name__ == '__main__':
     final_state = None
     n_mean_calc = 100
     for i in range(num_iterations):
+        statepool.fraction_keep_states = min(0.91 - 3*(i/num_iterations), 0.05)
         sort_state_values = statepool.evolve_step()
         score = np.mean(sort_state_values[:,1])
         scores.append(score)
         if i % 10 == 0:
-            print('episode: ', i,'score %.1f ' % score)
+            print('episode: ', i,'score %.5f ' % score)
 
     sorted_state_values = statepool.order_states()
     top_states = statepool.current_states[sorted_state_values[:10, 0].astype(int)]
