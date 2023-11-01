@@ -63,12 +63,18 @@ class CoatingStack():
             _type_: _description_
         """
         onehot_action = torch.nn.functional.one_hot(torch.from_numpy(np.array([action])), num_classes=self.n_actions)
+        #onehot_action = np.zeros(self.n_actions)
+        #onehot_action[action] = 1
         repos = onehot_action.reshape(self.max_layers, self.n_materials, self.n_thickness)
         actionind = np.argmax(repos)
         actions = np.unravel_index(actionind, repos.shape)
         # should give 33 numbers (which layer, which material, which thickness change)
 
         return actions
+    
+    def numpy_onehot(self, numpy_int, num_classes):
+        onehot = torch.nn.functional.one_hot(torch.from_numpy(np.array(numpy_int)), num_classes=num_classes)
+        return onehot
     
     def get_actions(self, action):
         """get the physical actions from the indices of the action
@@ -82,14 +88,14 @@ class CoatingStack():
         actions = self.action_onehot_to_position(action)
     
         layer = actions[0].item()
+        #material = np.zeros(self.n_materials)
+        #material[actions[1]] = 1
+        #material = torch.nn.functional.one_hot(torch.from_numpy(np.array([actions[1]])), num_classes=self.n_materials)
         material = self.numpy_onehot(actions[1], num_classes=self.n_materials)
         thickness_change = self.thickness_options[actions[2].item()]
 
         return layer, material, thickness_change
     
-    def numpy_onehot(self, numpy_int, num_classes):
-        onehot = torch.nn.functional.one_hot(torch.from_numpy(np.array(numpy_int)), num_classes=num_classes)
-        return onehot
         
     def sample_action_space(self, ):
         """sample from the action space
@@ -168,12 +174,12 @@ class CoatingStack():
         new_value = self.compute_state_value(new_state) 
         old_value = self.compute_state_value(old_state)
         reward_diff = new_value - old_value 
-        if reward_diff < 0:
-            reward = -1
+        if reward_diff <= 0:
+            reward = -0.01
         else:
             reward = new_value
 
-        return reward_diff, reward
+        return reward_diff, reward, new_value
     
     def get_new_state(self, current_states, actions):
         """new state is the current action choice
@@ -210,7 +216,7 @@ class CoatingStack():
 
         new_state = self.get_new_state(np.copy(self.current_state), actions)
       
-        reward_diff, reward = self.compute_reward(new_state, self.current_state)
+        reward_diff, reward, new_value = self.compute_reward(new_state, self.current_state)
 
 
         terminated = False
@@ -234,4 +240,4 @@ class CoatingStack():
         #print("Reward", reward.item())
         #self.print_state()
 
-        return new_state, reward, terminated, None
+        return new_state, reward, terminated, new_value
