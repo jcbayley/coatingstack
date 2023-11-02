@@ -164,17 +164,18 @@ class CoatingStack():
         #print(rho)
         #print(SbrZ)
         #sys.exit()
-        print(np.shape(SbrZ)) 
+        #print(SbrZ)
         
         
         aligoCTN = 2.4E-24 
         
-        stat = (np.abs(rCoat)) - (SbrZ/ aligoCTN)
+        stat = np.real(rCoat) - 1e-3*(SbrZ/ aligoCTN)
         
-        
+        #print(rCoat)
+        #print(np.abs(rCoat))
         #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
-            return -50
+            return -1e5
         else:
             return stat
     
@@ -291,3 +292,7 @@ if __name__ == "__main__":
     }
     
     cs = CoatingStack(max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False)
+
+    state = cs.sample_state_space()
+
+    val = cs.compute_state_value(state)

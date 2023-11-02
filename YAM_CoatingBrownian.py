@@ -1,12 +1,12 @@
-from deap import base, creator, tools
+#from deap import base, creator, tools
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
 import random
 import os 
-import pocal 
-from gwinc import * 
+#import pocal 
+#from gwinc import * 
 
 def generate_coating_stack(lambda_):
     """
@@ -478,5 +478,5 @@ def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, l
         'ThermoRefractive': np.sqrt(StrZ)
     }
 
-    return noise_summary
+    return noise_summary, rCoat, dcdp, rbar, r
 
