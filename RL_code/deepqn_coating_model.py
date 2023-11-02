@@ -4,9 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
-import gym, time
+import gymnasium as gym
+import time
 import matplotlib.pyplot as plt
 from deepqn_cart import plotLearning
+import copy 
 
 class Environment():
 
@@ -108,7 +110,7 @@ class Environment():
         action = np.random.randint(0,self.n_actions)
         return action
 
-    def compute_reward(self,state):
+    def compute_state_value(self,state):
         """_summary_
 
         Args:
@@ -116,22 +118,42 @@ class Environment():
         """
 
         reward = 0
+        rewards = []
         #print(len(state))
         for i,layer in enumerate(state):
-            if i == 0:
-                continue
+            last_material = self.materials[torch.argmax(state[i-1][1:]).item()]
+            current_material = self.materials[torch.argmax(state[i][1:]).item()]
+            last_thickness = state[i-1][0]
+            current_thickness = state[i][0]
+            if current_thickness > self.max_thickness:
+                #refract_diff = -10*np.abs(current_thickness - self.max_thickness)
+                refract_diff = -10#self.max_thickness
+            elif current_thickness < self.min_thickness:
+                #refract_diff = -10*np.abs(current_thickness - self.min_thickness)
+                refract_diff = -10#self.min_thickness
             else:
-                last_material = self.materials[torch.argmax(state[i-1][1:]).item()]
-                current_material = self.materials[torch.argmax(state[i][1:]).item()]
-                last_thickness = state[i-1][0]
-                current_thickness = state[i][0]
-                refract_diff = current_material["n"]*current_thickness + last_material["n"]*last_thickness
+                refract_diff = current_material["n"] + np.exp(-(current_thickness - 6)**2/0.5) #+ last_material["n"]*last_thickness
+            #print("rdiff", refract_diff)
+            rewards.append(refract_diff)
+            reward += refract_diff
 
-                #print("rdiff", refract_diff)
-                reward += refract_diff
-        
+       
         return reward
+    
+    def compute_reward(self, new_state, old_state):
+        """reward is the improvement of the state over the previous one
 
+        Args:
+            state (_type_): _description_
+            action (_type_): _description_
+        """
+
+        new_value = self.compute_state_value(new_state) 
+        old_value = self.compute_state_value(old_state)
+        reward_diff = new_value - old_value 
+
+        return reward_diff, new_value
+    
     def get_new_state(self, current_states, actions):
         """new state is the current action choice
 
@@ -155,7 +177,7 @@ class Environment():
         return current_states
 
 
-    def step(self, action):
+    def step(self, action, verbose=False):
         """action[0] - thickness
            action[1:N] - material probability
 
@@ -166,17 +188,32 @@ class Environment():
         actions = self.get_actions(action)
 
         terminated = False
-        if torch.any((self.current_state[0] + actions[2]) < self.min_thickness) or torch.any((self.current_state[0] + actions[2]) > self.max_thickness):
+        #print(torch.any((self.current_state[0] + actions[2]) < self.min_thickness))
+        if torch.any((self.current_state[:,0] + actions[2]) < self.min_thickness) or torch.any((self.current_state[:,0] + actions[2]) > self.max_thickness):
             #print("out of thickness bounds")
             terminated = True
-        
-        new_state = self.get_new_state(self.current_state, actions)
-        reward = self.compute_reward(new_state)
+            #pass
+            #reward = -1000000
+            #new_state = self.current_state
+
+        #temp_current_state = torch.clone(self.current_state)
+        new_state = self.get_new_state(torch.clone(self.current_state), actions)
+      
+        reward, state_value = self.compute_reward(new_state, self.current_state)
+
         self.length += 1
+
+        if verbose:
+            print(actions)
+            print(self.current_state)
+            print(new_state)
+
+        self.current_state = new_state
+        self.current_state_value = state_value
         #print("Reward", reward.item())
         #self.print_state()
 
-        return new_state, reward, terminated
+        return new_state, reward, terminated, state_value
 
 class ReplayBuffer(object):
     def __init__(self, max_size, input_shape, n_actions):
@@ -224,7 +261,7 @@ class DuelingLinearDeepQNetwork(nn.Module):
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.to(self.device)
         self.checkpoint_dir = chkpt_dir
-        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_dqn')
+        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_dqn.pt')
 
     def forward(self, state):
         l1 = F.relu(self.fc1(state))
@@ -331,17 +368,21 @@ class Agent(object):
 
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
+
+    root_dir = "./test_3_allopt"
+    if not os.path.isdir(root_dir):
+        os.makedirs(root_dir)
+
     n_layers = 5
     min_thickness = 1
-    max_thickness = 4
+    max_thickness = 10
 
     materials = {
-        0:{"n": 2},
-        1:{"n": 7},
-        2:{"n": 5},
+        0:{"n": 1},
+        1:{"n": 10},
     }
 
-    thickness_options = [-0.01,0.0,0.01]
+    thickness_options = [-1,-0.1,0.0,0.1,1]
 
     env = Environment(n_layers, min_thickness, max_thickness, materials, thickness_options=thickness_options)
 
@@ -353,32 +394,48 @@ if __name__ == '__main__':
     #  choose thickness, choose layer, then choose material (onehot)
     n_actions = env.n_actions
 
-    num_games = 1000
+    num_games = 2000
     load_checkpoint = False
 
-    agent = Agent(gamma=0.99, epsilon=1.0, alpha=5e-4,
+    agent = Agent(gamma=0.99, epsilon=1.0, alpha=1e-5,
                   input_dims=[n_observations], n_actions=n_actions, mem_size=100000, eps_min=0.01,
-                  batch_size=64, eps_dec=1e-3, replace=100)
+                  batch_size=128, eps_dec=1e-4, replace=100,
+                  chkpt_dir=root_dir)
 
     if load_checkpoint:
         agent.load_models()
 
-    filename = 'coating.png'
+    filename = os.path.join(root_dir,'coating.png')
     scores = []
     eps_history = []
     n_steps = 0
     final_state = None
+    n_mean_calc = 100
     for i in range(num_games):
         done = False
         observation = env.reset()
         score = 0
-
+        reward_window = []
+        runsteps = 0
         while not done:
             action = agent.choose_action(observation)
-            observation_, reward, done = env.step(action)
+            observation_, reward, done, new_reward = env.step(action)
             n_steps += 1
-            score += reward
-            
+            runsteps += 1
+            # Set the episode to end if the reward is within 1 std of the last N
+            score += reward #* 1./(runsteps)
+            if runsteps > 2000:
+                done=True
+            """
+            if runsteps < n_mean_calc:
+                reward_window.append(reward)
+            else:
+                reward_window.pop(0)
+                reward_window.append(reward)
+
+            if reward - np.mean(reward_window) < np.std(reward_window):
+                done = True
+            """
             agent.store_transition(observation.flatten(), action,
                                     reward, observation_.flatten(), int(done))
             agent.learn()
@@ -386,16 +443,61 @@ if __name__ == '__main__':
             observation = observation_
 
             final_state = observation
+
+
         scores.append(score)
         avg_score = np.mean(scores[max(0, i-100):(i+1)])
-        print('episode: ', i,'score %.1f ' % score,
-             ' average score %.1f' % avg_score,
-            'epsilon %.2f' % agent.epsilon)
-        #if i > 0 and i % 10 == 0:
-        #    agent.save_models()
+        if i % 10 == 0:
+            print('episode: ', i,'score %.1f ' % score,
+                ' average score %.1f' % avg_score,
+                'epsilon %.2f' % agent.epsilon)
+        if i > 0 and i % 100 == 0:
+            agent.save_models()
 
         eps_history.append(agent.epsilon)
 
+    print("Final state")
     print(final_state)
+
+    num_test = 3
+    nsteps = 20000
+    output_observations = np.zeros((num_test, *np.shape(final_state)))
+    output_scores = np.zeros((num_test, 1))
+    output_values = np.zeros((num_test, 1))
+    score_evolutions = np.zeros((num_test, nsteps))
+    for i in range(num_test):
+
+        observation = env.reset()
+        print(f"Obs: {i}", observation)
+        done = False
+        step_ind = 0
+        score = 0
+        while not done:
+            #print("step")
+            action = agent.choose_action(observation)
+            observation_, reward, done, new_state_value = env.step(action, verbose=False)
+        
+            #print(f"Reward: {reward}")
+            score += reward
+            score_evolutions[i, step_ind] = new_state_value
+            step_ind += 1
+            if step_ind >= nsteps:
+                done = True
+        print("Nsteps", step_ind)
+        
+        output_observations[i] = observation_
+        output_scores[i] = score
+        output_values[i] = new_state_value
+
+    print(output_observations)
+    print(output_scores)
+    print(output_values)
+
+    fig, ax = plt.subplots()
+    for i in range(num_test):
+        ax.plot(score_evolutions[i])
+    
+    fig.savefig(os.path.join(root_dir, "rewards.png"))
+
     x = [i+1 for i in range(num_games)]
     plotLearning(x, scores, eps_history, filename)
