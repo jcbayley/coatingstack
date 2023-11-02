@@ -109,19 +109,20 @@ class CoatingStack():
         return action
 
     
-    def compute_state_value(self, state, material_sub=1, lambda_=1, f=1, wBeam=1, Temp=1):
+    def compute_state_value(self, state, material_sub=1, lambda_=1064E-9, f=100, wBeam=0.062, Temp=293):
         """_summary_
 
         Args:
             state (_type_): _description_
-            material_sub (int, optional): _description_. Defaults to 1.
-            lambda_ (int, optional): _description_. Defaults to 1.
-            f (int, optional): _description_. Defaults to 1.
-            wBeam (int, optional): _description_. Defaults to 1.
-            Temp (int, optional): _description_. Defaults to 1.
+            material_sub (int, optional): Substrate material type 
+            
+            lambda_ (int, optional): laser wavelength (m)
+            f (int, optional): frequency of interest (Hz)
+            wBeam (int, optional): laser beam radius on optic(m)
+            Temp (int, optional): detector temperature (deg)
 
         Returns:
-            _type_: _description_
+            _type_: stuff
         """
 
         # Extract substrate properties
@@ -134,6 +135,7 @@ class CoatingStack():
         aLayer = np.zeros(self.max_layers)
         material_layers = np.zeros(len(state))
         d_opt = np.zeros(len(state))
+        
         for i,layer in enumerate(state):
             mat = np.argmax(layer[1:]) + 1
             material_layers[i] = mat
@@ -150,16 +152,30 @@ class CoatingStack():
 
         # Compute brownian and thermo-optic noises
         SbrZ, StoZ, SteZ, StrZ, brLayer = getCoatNoise2(f, lambda_, wBeam, Temp, self.materials, material_sub, material_layers, d_opt, dcdp)
-
+        
+        # change units to ASD 
+        SbrZ = np.sqrt(SbrZ)
+        StoZ= np.sqrt(StoZ)
+        SteZ = np.sqrt(SteZ)
+        StrZ = np.sqrt(StrZ)
+        
         #print("R", rCoat)
         #print("coat", absCoat)
         #print(rho)
         #print(SbrZ)
         #sys.exit()
-        stat = np.abs(rCoat) - np.mean(SbrZ)*1e37
+        #print(SbrZ)
+        
+        
+        aligoCTN = 2.4E-24 
+        
+        stat = np.real(rCoat) - 1e-3*(SbrZ/ aligoCTN)
+        
+        #print(rCoat)
+        #print(np.abs(rCoat))
         #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
-            return -50
+            return -1e5
         else:
             return stat
     
@@ -241,3 +257,42 @@ class CoatingStack():
         #self.print_state()
 
         return new_state, reward, terminated, new_value
+
+
+if __name__ == "__main__":
+    
+    max_layers = 5
+    min_thickness = 0.1
+    max_thickness = 1
+    materials = {
+        1: {
+            'name': 'SiO2',
+            'n': 1.44,
+            'a': 0,
+            'alpha': 0.51e-6,
+            'beta': 8e-6,
+            'kappa': 1.38,
+            'C': 1.64e6,
+            'Y': 72e9,
+            'prat': 0.17,
+            'phiM': 4.6e-5
+        },
+        2: {
+            'name': 'ta2o5',
+            'n': 2.07,
+            'a': 2,
+            'alpha': 3.6e-6,
+            'beta': 14e-6,
+            'kappa': 33,
+            'C': 2.1e6,
+            'Y': 140e9,
+            'prat': 0.23,
+            'phiM': 2.44e-4
+        },
+    }
+    
+    cs = CoatingStack(max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False)
+
+    state = cs.sample_state_space()
+
+    val = cs.compute_state_value(state)
