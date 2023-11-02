@@ -133,7 +133,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             
             state_vals.append(new_value)
 
-            reward -= 0.5
+            reward -= 0.01
             log_prob = dist.log_prob(action).unsqueeze(0)
             entropy += dist.entropy().mean()
 
@@ -144,12 +144,12 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             
             state = next_state.flatten()
 
-            if done or i > 2000:
+            if done or i > 500:
                 #print('Iteration: {}, Score: {}'.format(iter, i))
                 episode_durations.append(i + 1) 
                 break
 
-        if iter % 500 == 0 and iter > 0:
+        if iter % 100 == 0 and iter > 0:
             plot_durations(episode_durations, root_dir) 
             plot_rewards(iter, rewards, fig, ax)
             fig.savefig(os.path.join(root_dir, "rewards.png"))
@@ -176,7 +176,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
         optimiserC.step()
 
         if iter % 20 == 0:
-            print(f"Episode: {iter}, score: {rewards[-3:]}")
+            print(f"Episode: {iter}, score: {np.mean(rewards)}, {rewards[0]} ,{rewards[-1]}")
 
             torch.save({
                 "actor_state_dict": actor.state_dict(),
@@ -319,7 +319,7 @@ if __name__ == '__main__':
         },
     }
 
-    thickness_options = [-0.1,-0.01,0.0,0.01,0.1]
+    thickness_options = [-0.1,-0.01,0.01,0.1]
 
     env = CoatingStack(
         n_layers, 
@@ -328,12 +328,12 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 5000
+    num_iterations = 20000
 
     device = "cpu"
 
-    actor = Actor(env.state_space_size, env.n_actions, hidden_size=1024, n_hidden=4).to(device)
-    critic = Critic(env.state_space_size, env.n_actions, hidden_size=1024, n_hidden=4).to(device)
+    actor = Actor(env.state_space_size, env.n_actions, hidden_size=256, n_hidden=3).to(device)
+    critic = Critic(env.state_space_size, env.n_actions, hidden_size=256, n_hidden=3).to(device)
 
     #actor = Actor(env.state_space_size, env.n_actions).to(device)
     #critic = Critic(env.state_space_size, env.n_actions).to(device)

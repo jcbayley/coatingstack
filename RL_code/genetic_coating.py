@@ -144,8 +144,11 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 1000
-    statepool = StatePool(env, n_states=4000, states_fraction_keep = 0.3)
+    num_iterations = 200
+    statepool = StatePool(
+        env, 
+        n_states=4000, 
+        states_fraction_keep = 0.3)
 
 
 

@@ -156,10 +156,12 @@ class CoatingStack():
         #print(rho)
         #print(SbrZ)
         #sys.exit()
-        stat = np.abs(rCoat) - np.mean(SbrZ)*1e37
+        stat = np.abs(rCoat) #- np.mean(SbrZ)*1e37 +5
+        if stat < 0:
+            print("STAT LESS THAN ZERO")
         #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
-            return -50
+            return -1
         else:
             return stat
     
@@ -172,13 +174,23 @@ class CoatingStack():
         """
 
         new_value = self.compute_state_value(new_state) 
+        
         old_value = self.compute_state_value(old_state)
         reward_diff = new_value - old_value 
-        if reward_diff <= 0:
-            reward = -0.01
-        else:
-            reward = new_value
 
+        if reward_diff <= 0:
+            reward = -0.1
+        else:
+            if new_value < 0.2:
+                reward = 0
+            else:
+                reward = new_value
+        """
+        reward = new_value
+        reward_diff = new_value
+        if reward < 0.2:
+            reward = 0
+        """
         return reward_diff, reward, new_value
     
     def get_new_state(self, current_states, actions):
@@ -225,7 +237,7 @@ class CoatingStack():
             #print("out of thickness bounds")
             terminated = True
             #pass
-            reward = -100
+            reward = -1
             #new_state = self.current_state
 
         self.length += 1
