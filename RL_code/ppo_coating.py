@@ -1,8 +1,18 @@
-import torch
+import os
+import torch 
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 import numpy as np
+import gymnasium as gym
+import time
+import matplotlib.pyplot as plt
+from deepqn_cart import plotLearning
+import copy 
 from coating_utils import getCoatAbsorption, getCoatNoise2, getCoatRefl2
+from torch.distributions import Categorical
 
-class CoatingStack():
+class Environment():
 
     def __init__(self, max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False):
         self.variable_layers = variable_layers
@@ -51,7 +61,7 @@ class CoatingStack():
             layer = np.concatenate([[thickness], material_onehot])
             layers.append(layer)
 
-        return np.array(layers)
+        return torch.from_numpy(np.array(layers))
     
     def action_onehot_to_position(self, action):
         """change from integer action to a list of 3 indices according the the 3 actions
@@ -63,18 +73,12 @@ class CoatingStack():
             _type_: _description_
         """
         onehot_action = torch.nn.functional.one_hot(torch.from_numpy(np.array([action])), num_classes=self.n_actions)
-        #onehot_action = np.zeros(self.n_actions)
-        #onehot_action[action] = 1
         repos = onehot_action.reshape(self.max_layers, self.n_materials, self.n_thickness)
         actionind = np.argmax(repos)
         actions = np.unravel_index(actionind, repos.shape)
         # should give 33 numbers (which layer, which material, which thickness change)
 
         return actions
-    
-    def numpy_onehot(self, numpy_int, num_classes):
-        onehot = torch.nn.functional.one_hot(torch.from_numpy(np.array(numpy_int)), num_classes=num_classes)
-        return onehot
     
     def get_actions(self, action):
         """get the physical actions from the indices of the action
@@ -88,14 +92,14 @@ class CoatingStack():
         actions = self.action_onehot_to_position(action)
     
         layer = actions[0].item()
-        #material = np.zeros(self.n_materials)
-        #material[actions[1]] = 1
-        #material = torch.nn.functional.one_hot(torch.from_numpy(np.array([actions[1]])), num_classes=self.n_materials)
         material = self.numpy_onehot(actions[1], num_classes=self.n_materials)
         thickness_change = self.thickness_options[actions[2].item()]
 
         return layer, material, thickness_change
     
+    def numpy_onehot(self, numpy_int, num_classes):
+        onehot = torch.nn.functional.one_hot(torch.from_numpy(np.array(numpy_int)), num_classes=num_classes)
+        return onehot
         
     def sample_action_space(self, ):
         """sample from the action space
@@ -109,21 +113,8 @@ class CoatingStack():
         return action
 
     
-    def compute_state_value(self, state, material_sub=1, lambda_=1064E-9, f=100, wBeam=0.062, Temp=293):
-        """_summary_
+    def compute_state_value(self, state, material_sub=1, lambda_=1, f=1, wBeam=1, Temp=1):
 
-        Args:
-            state (_type_): _description_
-            material_sub (int, optional): Substrate material type 
-            
-            lambda_ (int, optional): laser wavelength (m)
-            f (int, optional): frequency of interest (Hz)
-            wBeam (int, optional): laser beam radius on optic(m)
-            Temp (int, optional): detector temperature (deg)
-
-        Returns:
-            _type_: stuff
-        """
 
         # Extract substrate properties
         nSub = self.materials[material_sub]['n']
@@ -135,9 +126,8 @@ class CoatingStack():
         aLayer = np.zeros(self.max_layers)
         material_layers = np.zeros(len(state))
         d_opt = np.zeros(len(state))
-        
         for i,layer in enumerate(state):
-            mat = np.argmax(layer[1:]) + 1
+            mat = np.argmax(layer[1:]).item() + 1
             material_layers[i] = mat
             d_opt[i] = layer[0]
             nLayer[i] = self.materials[mat]['n']
@@ -152,31 +142,16 @@ class CoatingStack():
 
         # Compute brownian and thermo-optic noises
         SbrZ, StoZ, SteZ, StrZ, brLayer = getCoatNoise2(f, lambda_, wBeam, Temp, self.materials, material_sub, material_layers, d_opt, dcdp)
-        
-        # change units to ASD 
-        SbrZ = np.sqrt(SbrZ)
-        StoZ= np.sqrt(StoZ)
-        SteZ = np.sqrt(SteZ)
-        StrZ = np.sqrt(StrZ)
-        
+
         #print("R", rCoat)
         #print("coat", absCoat)
         #print(rho)
         #print(SbrZ)
         #sys.exit()
-
-        #print(SbrZ)
-        
-        
-        aligoCTN = 2.4E-24 
-        
-        stat = np.real(rCoat) - 1e-3*(SbrZ/ aligoCTN)
-        
-        #print(rCoat)
-        #print(np.abs(rCoat))
+        stat = np.abs(rCoat) - np.mean(SbrZ)*1e38
         #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
-            return -1e5
+            return -50
         else:
             return stat
     
@@ -189,24 +164,14 @@ class CoatingStack():
         """
 
         new_value = self.compute_state_value(new_state) 
-        
         old_value = self.compute_state_value(old_state)
         reward_diff = new_value - old_value 
-
-        if reward_diff <= 0:
-            reward = -0.1
+        if reward_diff < 0:
+            reward = -1
         else:
-            if new_value < 0.2:
-                reward = 0
-            else:
-                reward = new_value
-        """
-        reward = new_value
-        reward_diff = new_value
-        if reward < 0.2:
-            reward = 0
-        """
-        return reward_diff, reward, new_value
+            reward = new_value
+
+        return reward_diff, reward
     
     def get_new_state(self, current_states, actions):
         """new state is the current action choice
@@ -241,20 +206,26 @@ class CoatingStack():
         
         actions = self.get_actions(action)
 
-        new_state = self.get_new_state(np.copy(self.current_state), actions)
-      
-        reward_diff, reward, new_value = self.compute_reward(new_state, self.current_state)
-
-
         terminated = False
+
+        new_state = self.get_new_state(torch.clone(self.current_state), actions)
+      
+        rewarddiff, reward = self.compute_reward(new_state, self.current_state)
+
         #print(torch.any((self.current_state[0] + actions[2]) < self.min_thickness))
-        if np.any((self.current_state[:,0] + actions[2]) < self.min_thickness) or np.any((self.current_state[:,0] + actions[2]) > self.max_thickness):
+        if torch.any((self.current_state[:,0] + actions[2]) < self.min_thickness) or torch.any((self.current_state[:,0] + actions[2]) > self.max_thickness):
             #print("out of thickness bounds")
             terminated = True
+            reward = -100
             #pass
-            reward = -1
-            #new_state = self.current_state
+            #reward = -1000000
+            new_state = self.current_state
+        else:
+            self.current_state = new_state
+            self.current_state_value = reward
 
+        #temp_current_state = torch.clone(self.current_state)
+        
         self.length += 1
 
         if verbose:
@@ -262,19 +233,139 @@ class CoatingStack():
             print(self.current_state)
             print(new_state)
 
-        self.current_state = new_state
-        self.current_state_value = reward
-        #print("Reward", reward.item())
-        #self.print_state()
 
-        return new_state, reward, terminated, new_value
+        return new_state, reward, terminated, reward
 
 
-if __name__ == "__main__":
+class Policy(nn.Module):
+    def __init__(self, state_space_size, n_actions):
+        super(Policy, self).__init__()
+        self.layer1 = nn.Linear(state_space_size, 1024)
+        self.layer2 = nn.Linear(1024,1024)
+        self.layer3 = nn.Linear(1024,512)
+        self.layer4 = nn.Linear(512,128)
+        self.layer5 = nn.Linear(128, n_actions)
+
+        self.saved_log_probs = []
+        self.rewards = []
+
+    def forward(self, x):
+        x = F.relu(self.layer1(x))
+        x = F.relu(self.layer2(x))
+        x = F.relu(self.layer3(x))
+        x = F.relu(self.layer4(x))
+        return F.softmax(self.layer5(x), dim=1)
+
+    def select_action(self, state):
+        state = state.float().unsqueeze(0)
+        probs = self.forward(state)
+        m = Categorical(probs)
+        action = m.sample()
+        self.saved_log_probs.append(m.log_prob(action))
+        return action.item()
+
+def run_episode(env, policy, render=False):
+
+    observation = env.reset()
+    totalreward = 0
+
+    observations = []
+    actions = []
+    rewards = []
+    probs = []
+
+    done = False
+
+    #while not done:
+    for _ in range(1000):
+        observations.append(observation)
+
+        action = policy.select_action(observation.flatten())
+        observation, reward, done, info = env.step(action)
+        if done:
+            break
+
+        totalreward += reward
+        policy.rewards.append(reward)
+        actions.append(action)
+
+    #for i, obs in enumerate(observations[::10]):
+    #    print(obs)
+    #    print(policy.rewards[::10][i])
     
-    max_layers = 5
-    min_thickness = 0.1
-    max_thickness = 1
+    value = env.compute_state_value(observation)
+
+    return totalreward, np.array(rewards), np.array(observations), np.array(actions), np.array(probs), value
+
+def finish_episode(policy, optimiser, gamma):
+    R = 0
+    policy_loss = []
+    # compute the discounted reward over whole episode
+    rewards = []
+    for r in policy.rewards[::-1]:
+        R = r + gamma * R
+        rewards.insert(0, R)
+    rewards = torch.tensor(rewards)
+    # compute advantage
+    rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-6)
+    for log_prob, reward in zip(policy.saved_log_probs, rewards):
+        policy_loss.append(-log_prob * reward)
+
+    # updates to model    
+    optimiser.zero_grad()
+    policy_loss = torch.cat(policy_loss).sum()
+    policy_loss.backward()
+    optimiser.step()
+    del policy.rewards[:]
+    del policy.saved_log_probs[:]
+
+def train(env, policy, optimiser, MAX_EPISODES=1000, gamma=0.99,seed=None, evaluate=False):
+
+    # initialize and policy
+    episode_rewards = []
+
+    # train until MAX_EPISODES
+    for i in range(MAX_EPISODES):
+
+        # run a single episode
+        total_reward, rewards, observations, actions, probs, value = run_episode(env, policy)
+
+        # keep track of episode rewards
+        episode_rewards.append(total_reward)
+
+        # update policy
+        if len(policy.rewards) > 2:
+            finish_episode(policy, optimiser, gamma=gamma)
+
+        print("EP: " + str(i) + " Score: " + str(total_reward) + " " + "Value: " + str(value))
+
+
+    return episode_rewards, policy
+
+def test_policy(policy, num_iterations):
+
+    total_rewards = []
+    total_observations = []
+    total_values = []
+    for _ in range(num_iterations):
+        totalreward, rewards, observations, actions, probs, value = run_episode(env, policy)
+        total_rewards.append(totalreward)
+        total_values.append(value)
+        total_observations.append(observations[-1])
+
+    return total_observations, total_rewards, total_values
+
+if __name__ == '__main__':
+    #env = gym.make('CartPole-v1')
+
+    root_dir = "./ppo_real_2"
+    if not os.path.isdir(root_dir):
+        os.makedirs(root_dir)
+
+    n_layers = 5
+    min_thickness = 0.01
+    max_thickness = 2
+
     materials = {
         1: {
             'name': 'SiO2',
@@ -301,9 +392,32 @@ if __name__ == "__main__":
             'phiM': 2.44e-4
         },
     }
+
+    thickness_options = [-0.1,-0.01,-0.001,0.0,0.001,0.01,0.1]
+
+    env = Environment(
+        n_layers, 
+        min_thickness, 
+        max_thickness, 
+        materials, 
+        thickness_options=thickness_options)
     
-    cs = CoatingStack(max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False)
+    theta = np.random.rand(4)
+    alpha = 0.002
+    gamma = 0.7
+    policy = Policy(env.state_space_size, env.n_actions)
+    optimiser = optim.Adam(policy.parameters(), lr=1e-2)
+    
+    num_iterations = 100
 
-    state = cs.sample_state_space()
+    episode_rewards, policy = train(env, policy, optimiser, gamma=gamma, MAX_EPISODES=num_iterations, seed=None, evaluate=False)
 
-    val = cs.compute_state_value(state)
+    fig, ax = plt.subplots()
+    ax.plot(episode_rewards)
+    fig.savefig(os.path.join(root_dir, "episode_rewards.png"))
+    observations, rewards, values = test_policy(policy, 2)
+
+    print(observations)
+    print(rewards)
+    print(values)
+

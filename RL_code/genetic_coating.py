@@ -92,9 +92,9 @@ if __name__ == '__main__':
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
-    n_layers = 5
-    min_thickness = 0.01
-    max_thickness = 2
+    n_layers = 10
+    min_thickness = 1e-3
+    max_thickness = 1
 
     materials = {
         1: {
@@ -121,18 +121,6 @@ if __name__ == '__main__':
             'prat': 0.23,
             'phiM': 2.44e-4
         },
-        3: {
-            'name': 'nothing',
-            'n': 2.37,
-            'a': 2,
-            'alpha': 3.6e-6,
-            'beta': 14e-6,
-            'kappa': 33,
-            'C': 2.1e6,
-            'Y': 140e9,
-            'prat': 0.43,
-            'phiM': 2.44e-4
-        }
     }
 
     thickness_options = [-0.1,-0.01,-0.001,0.0,0.001,0.01,0.1]
@@ -144,6 +132,7 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
+
     num_iterations = 200
     statepool = StatePool(
         env, 
@@ -174,4 +163,29 @@ if __name__ == '__main__':
     top_states = statepool.current_states[sorted_state_values[:10, 0].astype(int)]
     print(top_states)
     print(sorted_state_values[:10])
+
+    top_state_value = top_states[0]
+
+    print("-----------------------------")
+    print(top_state_value)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.grid(True)
+    depth_so_far = 0  # To keep track of where to plot the next bar
+    colors = ["C0", "C1", "C2"]
+    for i in range(len(top_state_value)):
+        material_idx = np.argmax(top_state_value[i][1:]) 
+        thickness = top_state_value[i][0]
+        ax.bar(depth_so_far + thickness / 2, thickness, 
+                width=thickness, 
+                color=colors[material_idx])
+        depth_so_far += thickness
+
+    ax.set_xlim([0, depth_so_far * 1.01])
+    ax.set_ylabel('Physical Thickness [nm]')
+    ax.set_xlabel('Layer Position')
+    ax.set_title('Generated Stack')
+
+    fig.savefig(os.path.join(root_dir, "coating.png"))
+
 
