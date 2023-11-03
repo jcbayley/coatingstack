@@ -171,14 +171,15 @@ class CoatingStack():
         
         
         aligoCTN = 2.4E-24 
-        
+
+        """
         if rCoat<0: 
             rCoat = -1
         else:
             rCoat = np.log(rCoat)
-            
+        """ 
         
-        stat = rCoat #- 1e-3*(SbrZ/ aligoCTN)
+        stat = rCoat - 1e-3*(SbrZ/ aligoCTN)
         
         #print(rCoat)
         #print(np.abs(rCoat))
