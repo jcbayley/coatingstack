@@ -144,7 +144,7 @@ def test_outputs():
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./genetic_real_2"
+    root_dir = "./genetic_real_2_50layers"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -200,7 +200,6 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-
     num_iterations = 2000
     statepool = StatePool(
         env, 
@@ -213,6 +212,7 @@ if __name__ == '__main__':
     eps_history = []
     n_steps = 0
     final_state = None
+    
     n_mean_calc = 100
     for i in range(num_iterations):
         #statepool.fraction_keep_states = min(0.91 - 3*(i/num_iterations), 0.05)
@@ -251,5 +251,90 @@ if __name__ == '__main__':
 
     plotting.plot_coating(top_state, os.path.join(root_dir, "coating.png"))
 
+    #print(top_state_value)
 
+    """
+    ### A little bit of index refining to bring together multiple layers of the same material 
+    # Extract the second and third columns
+    second_column = top_state_value[:, 1]
+    third_column = top_state_value[:, 2]
+
+    # Function to group consecutive indices based on matching values
+    def group_consecutive(arr):
+        groups = []
+        current_group = [0]
+        for i in range(1, len(arr)):
+            if arr[i] == arr[current_group[-1]]:
+                current_group.append(i)
+            else:
+                if len(current_group) > 1:
+                    groups.append(current_group)
+                current_group = [i]
+        if len(current_group) > 1:
+            groups.append(current_group)
+        return groups
+
+    # Group consecutive indices in the second column
+    groups_of_consecutive_indices_second_column = group_consecutive(second_column)
+
+    # Group consecutive indices in the third column
+    groups_of_consecutive_indices_third_column = group_consecutive(third_column)
+
+    # Combine groups from both columns
+    all_groups = groups_of_consecutive_indices_second_column + groups_of_consecutive_indices_third_column
+
+    # Create a new array to store the results
+    result_array = []
+
+    # Keep track of indices that have been processed
+    processed_indices = set()
+
+    # Iterate through the original array
+    for i in range(len(top_state_value)):
+        if i in processed_indices:
+            continue
+        # Check if the current index is part of any group
+        current_group = None
+        for group in all_groups:
+            if i in group:
+                current_group = group
+                break
+        # If it's part of a group, sum the rows and add to result_array
+        if current_group is not None:
+            summed_row = np.sum(top_state_value[current_group, :], axis=0)
+            summed_row[np.argmax(summed_row[1:])+1 ] = 1
+            result_array.append(summed_row)
+            processed_indices.update(current_group)
+        # If it's not part of any group, add the row as it is
+        else:
+            result_array.append(top_state_value[i, :])
+
+    # Convert result_array to a NumPy array
+    result_array = np.array(result_array)
+    
+    ###
+    print(result_array)
+    
+
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.grid(True)
+    depth_so_far = 0  # To keep track of where to plot the next bar
+    colors = ["C0", "C1", "C2"]
+    
+    for i in range(len(result_array)):
+        material_idx = np.argmax(result_array[i][1:]) 
+        thickness = result_array[i][0]
+        ax.bar(depth_so_far + thickness / 2, thickness, 
+                width=thickness, 
+                color=colors[material_idx])
+        depth_so_far += thickness
+
+    ax.set_xlim([0, depth_so_far * 1.01])
+    ax.set_ylabel('Physical Thickness [nm]')
+    ax.set_xlabel('Layer Position')
+    ax.set_title('Generated Stack')
+
+    fig.savefig(os.path.join(root_dir, "coating.png"))
+    """
 
