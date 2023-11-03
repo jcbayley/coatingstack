@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from deepqn_cart import plotLearning
 import copy 
 from environments import CoatingStack
+import plotting
 
 class StatePool():
 
@@ -24,7 +25,11 @@ class StatePool():
         self.current_states = self.get_new_states(self.n_states)
 
     def order_states(self, ):
+        """set the order of states based on their value
 
+        Returns:
+            array: array of sorted state values
+        """
         state_values = []
         for i in range(self.n_states):
             temp_stval = self.environment.compute_state_value(self.current_states[i])
@@ -33,14 +38,52 @@ class StatePool():
         sorted_state_values = sorted(state_values, key=lambda a: -a[1])
 
         return np.array(sorted_state_values)
+    
+    def check_state_possible(self, state):
+        """make sure that adjacent layers cannot have the same material
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        current_material = -1
+        possible = True
+        for layer in state:
+            new_material = np.argmax(layer[1:])
+            if new_material == current_material:
+                possible = False
+                break
+            current_material = new_material
+
+        return possible
 
     def evolve_state(self, state):
+        """Evolve a state, pick a random action and apply this to a state
+
+        Args:
+            state (int): action choice
+
+        Returns:
+            array: new state to pick
+        """
+        
         action = np.random.randint(self.environment.n_actions)
         actions = self.environment.get_actions(action)
         new_state = self.environment.get_new_state(state, actions)
+        #done = self.check_state_possible(new_state)
         return new_state
     
     def state_crossover(self, states):
+        """swap some attributes of the given states
+
+        Args:
+            states (array): set of states 
+
+        Returns:
+            array: set of states
+        """
         n_states, n_layers, n_features = np.shape(states)
         # creates indicies for each of the example states and shuffles them
         data_inds = np.arange(n_states)
@@ -57,7 +100,11 @@ class StatePool():
         return states
 
     def evolve_step(self,):
+        """Evolve one step, by sorting states, taking top n% duplicating them and applying crossover
 
+        Returns:
+            _type_: _description_
+        """
         sorted_state_values = self.order_states()
         n_keep_states = int(self.states_fraction_keep * self.n_states)
         top_state_values = sorted_state_values[:n_keep_states]
@@ -74,9 +121,18 @@ class StatePool():
         return top_state_values
 
     def get_new_states(self, N):
+        """Get N new random states
+
+        Args:
+            N (int): number of states to generatae
+
+        Returns:
+            array: set of states
+        """
         states = []
         for i in range(N):
-            states.append(self.environment.sample_state_space())
+            new_state = self.environment.sample_state_space()
+            states.append(new_state)
         return np.array(states)
     
 
@@ -93,7 +149,7 @@ if __name__ == '__main__':
         os.makedirs(root_dir)
 
     n_layers = 10
-    min_thickness = 1e-3
+    min_thickness = 0.0
     max_thickness = 1
 
     materials = {
@@ -121,6 +177,18 @@ if __name__ == '__main__':
             'prat': 0.23,
             'phiM': 2.44e-4
         },
+        3: {
+            'name': 'newmat',
+            'n': 2.6,
+            'a': 2,
+            'alpha': 3.7e-6,
+            'beta': 18e-6,
+            'kappa': 32,
+            'C': 2.1e6,
+            'Y': 140e9,
+            'prat': 0.43,
+            'phiM': 8.44e-4
+        },
     }
 
     thickness_options = [-0.1,-0.01,-0.001,0.0,0.001,0.01,0.1]
@@ -132,56 +200,56 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 500
-    statepool = StatePool(env, n_states=4000, states_fraction_keep = 0.3)
 
-
+    num_iterations = 2000
+    statepool = StatePool(
+        env, 
+        n_states=5000, 
+        states_fraction_keep = 0.3)
 
     filename = os.path.join(root_dir,'coating.png')
     scores = []
+    max_scores = []
     eps_history = []
     n_steps = 0
     final_state = None
     n_mean_calc = 100
     for i in range(num_iterations):
-        statepool.fraction_keep_states = min(0.91 - 3*(i/num_iterations), 0.05)
+        #statepool.fraction_keep_states = min(0.91 - 3*(i/num_iterations), 0.05)
         sort_state_values = statepool.evolve_step()
         score = np.mean(sort_state_values[:,1])
         scores.append(score)
+        max_scores.append(sort_state_values[0,1])
         if i % 10 == 0:
             print('episode: ', i,'score %.5f ' % score)
 
     fig, ax = plt.subplots()
-    ax.plot(scores)
+    ax.plot(scores[200:])
     fig.savefig(os.path.join(root_dir, "scores.png"))
+
+    fig, ax = plt.subplots()
+    ax.plot(scores[-400:])
+    fig.savefig(os.path.join(root_dir, "scores_zoom.png"))
+
+    fig, ax = plt.subplots()
+    ax.plot(np.log(np.abs(max_scores))[200:])
+    fig.savefig(os.path.join(root_dir, "max_scores.png"))
+
+    fig, ax = plt.subplots()
+    ax.plot(max_scores[-400:])
+    fig.savefig(os.path.join(root_dir, "max_scores_zoom.png"))
 
     sorted_state_values = statepool.order_states()
     top_states = statepool.current_states[sorted_state_values[:10, 0].astype(int)]
     print(top_states)
     print(sorted_state_values[:10])
 
-    top_state_value = top_states[0]
+    top_state = top_states[0]
 
     print("-----------------------------")
-    print(top_state_value)
+    print(top_state)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ax.grid(True)
-    depth_so_far = 0  # To keep track of where to plot the next bar
-    colors = ["C0", "C1", "C2"]
-    for i in range(len(top_state_value)):
-        material_idx = np.argmax(top_state_value[i][1:]) 
-        thickness = top_state_value[i][0]
-        ax.bar(depth_so_far + thickness / 2, thickness, 
-                width=thickness, 
-                color=colors[material_idx])
-        depth_so_far += thickness
+    plotting.plot_coating(top_state, os.path.join(root_dir, "coating.png"))
 
-    ax.set_xlim([0, depth_so_far * 1.01])
-    ax.set_ylabel('Physical Thickness [nm]')
-    ax.set_xlabel('Layer Position')
-    ax.set_title('Generated Stack')
-
-    fig.savefig(os.path.join(root_dir, "coating.png"))
 
 
