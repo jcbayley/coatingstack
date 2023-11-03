@@ -12,6 +12,7 @@ import copy
 from environments import CoatingStack
 from itertools import count
 from torch.distributions import Categorical
+import plotting
 
 class Actor(nn.Module):
     def __init__(self, state_size, action_size, hidden_size=256, n_hidden=2):
@@ -98,12 +99,51 @@ def plot_rewards(iter, rewards, fig=None, ax=None):
     #okpos = rewards < -1
     #print(np.shape(okpos), np.shape(rewards), np.shape(steps))
     ax.plot(steps, rewards, label=f"Iteration: {iter}")
-    ax.set_ylim([-1,1])
+    ax.set_ylim([-10,max(rewards) + 1])
     ax.legend()
 
     plt.close(fig)
 
     return fig
+
+def plot_values(iter, values, pred_values, fig=None, ax=None):
+    if fig is None:
+        fig, ax = plt.subplots()
+
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("reward")
+
+    steps = np.arange(len(values))
+    if len(np.shape(values)) > 1:
+        values = np.array(values)[:,0]
+    else:
+        values = np.array(values)
+    if len(np.shape(pred_values)) > 1:
+        pred_values = np.array(pred_values)[:,0]
+    else:
+        pred_values = np.array(pred_values)
+    #okpos = rewards < -1
+    #print(np.shape(okpos), np.shape(rewards), np.shape(steps))
+    ax.plot(steps, values - pred_values, label=f"Values: {iter}")
+    #ax.plot(steps, pred_values, label=f"Pred Values: {iter}")
+    #ax.set_ylim([-1,np.max([values, pred_values]) + 1])
+    ax.legend()
+
+    plt.close(fig)
+
+    return fig
+
+def plot_score(end_scores, max_scores, fname=None):
+
+    fig, ax = plt.subplots()
+    ax.plot(max_scores, label="max_scores", marker=".", ls="none")
+    ax.plot(end_scores, label="end_scores", marker=".", ls="none")
+    ax.set_xlabel("episode")
+    ax.set_ylabel("score")
+    ax.set_ylim([-10, max(max_scores) + 1])
+
+    if fname is not None:
+        fig.savefig(fname)
 
 
 def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", root_dir="./"):
@@ -112,8 +152,12 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
 
 
     episode_durations = []
+    episode_median_scores = []
+    episode_end_scores = []
     fig, ax = plt.subplots()
     figval, axval = plt.subplots()
+    figvals, axvals = plt.subplots()
+    figret, axret = plt.subplots()
     for iter in range(n_iters):
         state = env.reset().flatten()
         log_probs = []
@@ -133,7 +177,6 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             
             state_vals.append(new_value)
 
-            reward -= 0.01
             log_prob = dist.log_prob(action).unsqueeze(0)
             entropy += dist.entropy().mean()
 
@@ -144,17 +187,14 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             
             state = next_state.flatten()
 
-            if done or i > 500:
+            if done or i > 1000:
                 #print('Iteration: {}, Score: {}'.format(iter, i))
                 episode_durations.append(i + 1) 
                 break
 
-        if iter % 100 == 0 and iter > 0:
-            plot_durations(episode_durations, root_dir) 
-            plot_rewards(iter, rewards, fig, ax)
-            fig.savefig(os.path.join(root_dir, "rewards.png"))
-            plot_rewards(iter, state_vals, figval, axval)
-            figval.savefig(os.path.join(root_dir, "state_values.png"))
+        
+        episode_end_scores.append(state_vals[-1])
+        episode_median_scores.append(np.max(state_vals))
 
         next_state = torch.FloatTensor(next_state).to(device)
         next_value = critic(next_state.flatten())
@@ -162,6 +202,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
         log_probs = torch.cat(log_probs)
         returns = torch.cat(returns).detach()
         values = torch.cat(values)
+
 
         advantage = returns - values
 
@@ -175,7 +216,23 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
         optimiserA.step()
         optimiserC.step()
 
-        if iter % 20 == 0:
+        if iter % 1000 == 0 and iter > 0:
+            plot_durations(episode_durations, root_dir) 
+            plot_rewards(iter, rewards, fig, ax)
+            fig.savefig(os.path.join(root_dir, "rewards.png"))
+            plot_rewards(iter, state_vals, figval, axval)
+            figval.savefig(os.path.join(root_dir, "state_values.png"))
+
+            #plot_values(iter, state_vals, values.detach().numpy(), fig=figvals, ax=axvals)
+            #figvals.savefig(os.path.join(root_dir, "values_state.png"))
+
+            plot_values(iter, returns, values.detach().numpy(), fig=figret, ax=axret)
+            figret.savefig(os.path.join(root_dir, "values.png"))
+
+            plot_score(episode_end_scores, episode_median_scores, fname=os.path.join(root_dir, "running_scores.png"))
+
+
+        if iter % 100 == 0:
             print(f"Episode: {iter}, score: {np.mean(rewards)}, {rewards[0]} ,{rewards[-1]}")
 
             torch.save({
@@ -254,11 +311,13 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
         print(final_rewards[i][max_ind])
         print(final_rewards[i][-1])
 
+        plotting.plot_coating(max_state, os.path.join(root_dir, f"coating_{i}.png"))
+
     fig, ax = plt.subplots()
     for i in range(n_starts):
         ax.plot(final_rewards[i])
 
-    ax.set_ylim([-1,1])
+    ax.set_ylim([-1,float(np.max(final_rewards)) + 1])
     
     fig.savefig(os.path.join(root_dir, "test_rewards.png"))
 
@@ -266,7 +325,7 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
     for i in range(n_starts):
         ax.plot(final_state_values[i])
 
-    ax.set_ylim([-1,1])
+    ax.set_ylim([-1,max(final_state_values) + 1])
     
     fig.savefig(os.path.join(root_dir, "test_state_values.png"))
 
@@ -274,7 +333,7 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
     for i in range(n_starts):
         ax.plot(final_values[i])
 
-    ax.set_ylim([-1,1])
+    ax.set_ylim([-1,max(final_values) + 1])
     
     fig.savefig(os.path.join(root_dir, "test_values.png"))
     
@@ -284,7 +343,7 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./actorcritic_real_contrewardloss_timepenalty"
+    root_dir = "./actorcritic_updated_plot"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
@@ -338,8 +397,8 @@ if __name__ == '__main__':
     #actor = Actor(env.state_space_size, env.n_actions).to(device)
     #critic = Critic(env.state_space_size, env.n_actions).to(device)
 
-    optimiserA = optim.Adam(actor.parameters(), lr=1e-4)
-    optimiserC = optim.Adam(critic.parameters(), lr=1e-4)
+    optimiserA = optim.Adam(actor.parameters(), lr=1e-3)
+    optimiserC = optim.Adam(critic.parameters(), lr=1e-3)
 
     trainIters(
         actor, 

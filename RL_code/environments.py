@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from coating_utils import getCoatAbsorption, getCoatNoise2, getCoatRefl2
+import time
 
 class CoatingStack():
 
@@ -135,13 +136,17 @@ class CoatingStack():
         aLayer = np.zeros(self.max_layers)
         material_layers = np.zeros(len(state))
         d_opt = np.zeros(len(state))
-        
+        current_material = -1
         for i,layer in enumerate(state):
             mat = np.argmax(layer[1:]) + 1
+            if current_material == mat:
+                return -1e2
+            current_material = mat
             material_layers[i] = mat
             d_opt[i] = layer[0]
             nLayer[i] = self.materials[mat]['n']
             aLayer[i] = self.materials[mat]['a']
+
 
 
         # Compute reflectivities
@@ -175,11 +180,17 @@ class CoatingStack():
         #print(rCoat)
         #print(np.abs(rCoat))
         #print(np.abs(rCoat), np.mean(SbrZ)*1e38, stat)
+        if np.isnan(stat) or np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
+            return -1e2
+        else:    
+            return stat
+        """
         if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
             return -1e5
         else:
             return stat
-    
+        """
+
     def compute_reward(self, new_state, old_state):
         """reward is the improvement of the state over the previous one
 
@@ -188,25 +199,35 @@ class CoatingStack():
             action (_type_): _description_
         """
 
-        new_value = self.compute_state_value(new_state) 
+        new_value = self.compute_state_value(new_state) + 5
         
-        old_value = self.compute_state_value(old_state)
+        old_value = self.compute_state_value(old_state) + 5
         reward_diff = new_value - old_value 
-
+        
+        
         if reward_diff <= 0:
-            reward = -0.1
+            reward = -1
         else:
-            if new_value < 0.2:
-                reward = 0
+            #if new_value < 0.2:
+            #    reward = 0
+            #else:
+            if new_value == -1e2:
+                reward = -1
             else:
                 reward = new_value
         """
-        reward = new_value
-        reward_diff = new_value
-        if reward < 0.2:
-            reward = 0
+
+        if new_value == -1e2:
+            reward = -1
+        else:
+            reward = new_value
+        #reward = new_value
+        #reward_diff = new_value
+        #if reward < 0.2:
+        #    reward = 0s
         """
-        return reward_diff, reward, new_value
+ 
+        return reward_diff, reward, new_value 
     
     def get_new_state(self, current_states, actions):
         """new state is the current action choice
@@ -250,10 +271,13 @@ class CoatingStack():
         #print(torch.any((self.current_state[0] + actions[2]) < self.min_thickness))
         if np.any((self.current_state[:,0] + actions[2]) < self.min_thickness) or np.any((self.current_state[:,0] + actions[2]) > self.max_thickness):
             #print("out of thickness bounds")
-            terminated = True
+            terminated = False
             #pass
-            reward = -1
+            reward = -1e2
             #new_state = self.current_state
+        else:
+            self.current_state = new_state
+            self.current_state_value = reward
 
         self.length += 1
 
@@ -262,10 +286,6 @@ class CoatingStack():
             print(self.current_state)
             print(new_state)
 
-        self.current_state = new_state
-        self.current_state_value = reward
-        #print("Reward", reward.item())
-        #self.print_state()
 
         return new_state, reward, terminated, new_value
 
@@ -307,3 +327,31 @@ if __name__ == "__main__":
     state = cs.sample_state_space()
 
     val = cs.compute_state_value(state)
+
+    ### TEST vaild arangements
+
+    def generate_valid_arrangements(materials, num_layers):
+        def backtrack(arrangement):
+            if len(arrangement) == num_layers:
+                valid_arrangements.append(arrangement)
+                return
+            for material in materials:
+                if not arrangement or arrangement[-1] != material:
+                    backtrack(arrangement + [material])
+
+        valid_arrangements = []
+        backtrack([])
+        return valid_arrangements
+
+    # Define materials and number of layers
+    materials = ['0','1','2']  # Replace '...' with the rest of your materials
+    num_layers = 20
+
+    # Generate valid arrangements
+    st = time.time()
+    valid_arrangements = generate_valid_arrangements(materials, num_layers)
+    print("time: ", time.time() - st)
+    print(np.shape(valid_arrangements))
+    # Print a sample of valid arrangements (to avoid printing too many)
+    for arrangement in valid_arrangements[:10]:
+        print(arrangement)
