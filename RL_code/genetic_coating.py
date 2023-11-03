@@ -88,11 +88,11 @@ def test_outputs():
 if __name__ == '__main__':
     #env = gym.make('CartPole-v1')
 
-    root_dir = "./genetic_real_2"
+    root_dir = "./genetic_real_2_50layers"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
-    n_layers = 10
+    n_layers = 5
     min_thickness = 1e-3
     max_thickness = 1
 
@@ -132,8 +132,8 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 100
-    statepool = StatePool(env, n_states=400, states_fraction_keep = 0.3)
+    num_iterations = 500
+    statepool = StatePool(env, n_states=300, states_fraction_keep = 0.3)
 
 
 
