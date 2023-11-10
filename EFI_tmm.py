@@ -10,7 +10,7 @@ import seaborn as sns
 import numpy as np  
 import matplotlib.pyplot as plt 
 
-def CalculateEFI_tmm(dOpt ,materialLayer, materialParams,lambda_ =1064 ,t_air = 500,polarisation='s' ,plots ='False' ):
+def CalculateEFI_tmm(dOpt ,materialLayer, materialParams,lambda_ =1064 ,t_air = 500,polarisation='p' ,plots ='False' ):
     
     
     # function calcualtes the normallised electric field intensity inside a thin film coating/coating stack usign tmm. This method 
@@ -131,6 +131,45 @@ def CalculateEFI_tmm(dOpt ,materialLayer, materialParams,lambda_ =1064 ,t_air = 
         ax2.set_ylim([0,np.max(E_sub)*1.2])
         plt.show()
 
-    return E_sub, layer_idx,  
+    return E_sub, layer_idx,  ds
     
-    
+
+def CalculateAbsorption_tmm(dOpt, materialLayer, materialParams, lambda_=1064, t_air=500, polarisation='p'):
+    """
+    Calculate the absorption at each position within the layers of a thin film stack using tmm.
+    """
+
+    wavelength = lambda_ * 1e-9  # Convert to meters
+
+    # Air layer parameters
+    n_air = materialParams[999]['n']
+
+    # Set up the coating stack
+    n_coat = [materialParams[layer]['n'] for layer in materialLayer]
+    k_coat = [materialParams[layer]['k'] for layer in materialLayer]
+    t_coat = [dOpt[layer] for layer in materialLayer]  # Assuming dOpt contains the thickness of each layer
+
+    # Refractive index list for the stack including air and substrate
+    n_list = [complex(n_air, 0)] + [complex(n, k) for n, k in zip(n_coat, k_coat)]
+
+    # Thickness list for the stack including air and substrate
+    d_list = [np.inf] + t_coat + [np.inf]
+
+    # Angle of incidence
+    angle = 0
+
+    # Calculate coherent TMM data
+    coh_tmm_data = tmm.coh_tmm(polarisation, n_list, d_list, angle, wavelength)
+
+    # Create a function to calculate absorption at any given depth in a layer
+    def absorption_fn(layer, depth_in_layer):
+        n = n_list[layer]
+        return tmm.absorp_analytic_fn(layer, depth_in_layer, coh_tmm_data)
+
+    # Calculate absorption in each layer
+    absorption = []
+    for i, thickness in enumerate(t_coat, start=1):  # start=1 skips the air layer
+        absorption_in_layer = [absorption_fn(i, d) for d in np.linspace(0, thickness, num=100)]
+        absorption.append(absorption_in_layer)
+
+    return absorption
