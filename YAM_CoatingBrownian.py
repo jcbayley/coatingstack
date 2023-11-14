@@ -427,6 +427,7 @@ def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, l
 
     # Compute reflectivities
     rCoat, dcdp, rbar, r = getCoatRefl2(1, nSub, nLayer, dOpt)
+    print(rCoat)
 
     # Compute absorption
     absCoat, absLayer, powerLayer, rho = getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r)
