@@ -1,12 +1,15 @@
-#from deap import base, creator, tools
+#from thermal_noise_hong import getCoatBrownian
+from deap import base, creator, tools
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
 import random
 import os 
-#import pocal 
-#from gwinc import * 
+from gwinc import * 
+import numpy as np
+
+
 
 def generate_coating_stack(lambda_):
     """
