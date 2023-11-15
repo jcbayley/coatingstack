@@ -405,7 +405,7 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     
     return SbrZ, StoZ, SteZ, StrZ, brLayer
 
-def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, lambda_=1, f=1, wBeam=1, Temp=1):
+def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, lambda_=1, f=1, wBeam=1, Temp=1,plots=True):
     # Set seaborn style and viridis color palette
     sns.set_style("whitegrid")
     sns.set_palette("tab10")
@@ -434,44 +434,45 @@ def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, l
 
     # Compute brownian and thermo-optic noises
     SbrZ, StoZ, SteZ, StrZ, brLayer = getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, materialLayer, dOpt, dcdp)
-
-    # Plotting
-    # Absorption values
-    plt.figure()
-    plt.semilogy(rho,'o')
-    plt.semilogy(powerLayer,'o')
-    plt.semilogy(rho * powerLayer)
-    plt.legend(['rho_j', 'P_j / P_0', 'rho_bar_j'])
-    plt.xlabel('Layer number')
-
-    # Noise weights for each layer
-    plt.figure()
-    materials = np.unique(materialLayer)
-    # Get a list of colors from the Seaborn viridis palette
-    colors = sns.color_palette("viridis", n_colors=len(materials) + 2)  # +2 for the two additional plots
-
-
-    for idx, i in enumerate(materials):
-        matidx = np.where(materialLayer == i)[0]  # Extract the array from the tuple
-        plt.bar(matidx, nLayer[matidx], color=colors[idx], label=materialParams[i]['name'])
-       # Use the next color in the palette for the following plots
-    plt.plot(-dcdp, 'o', color=colors[-2], markersize=10, label='-dphi_c / dphi_j')
-    plt.plot(brLayer, 'o', color=colors[-1], markersize=10, label='b_j')
-    plt.xlabel('Layer number')
-    plt.legend()
-
     
-    # Noise plots
-    plt.figure()
-    plt.loglog(f, np.sqrt(SbrZ), '--')
-    plt.loglog(f, np.sqrt(StoZ))
-    plt.loglog(f, np.sqrt(SteZ), '-.')
-    plt.loglog(f, np.sqrt(StrZ), '-.')
-    plt.legend(['Brownian Noise', 'Thermo-optic Noise', 'TE Component', 'TR Component'])
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('Thermal noise [m/sqrt(Hz)]')
+    if plots ==True: 
+        # Plotting
+        # Absorption values
+        plt.figure()
+        plt.semilogy(rho,'o')
+        plt.semilogy(powerLayer,'o')
+        plt.semilogy(rho * powerLayer)
+        plt.legend(['rho_j', 'P_j / P_0', 'rho_bar_j'])
+        plt.xlabel('Layer number')
 
-    plt.show()
+        # Noise weights for each layer
+        plt.figure()
+        materials = np.unique(materialLayer)
+        # Get a list of colors from the Seaborn viridis palette
+        colors = sns.color_palette("viridis", n_colors=len(materials) + 2)  # +2 for the two additional plots
+
+
+        for idx, i in enumerate(materials):
+            matidx = np.where(materialLayer == i)[0]  # Extract the array from the tuple
+            plt.bar(matidx, nLayer[matidx], color=colors[idx], label=materialParams[i]['name'])
+        # Use the next color in the palette for the following plots
+        plt.plot(-dcdp, 'o', color=colors[-2], markersize=10, label='-dphi_c / dphi_j')
+        plt.plot(brLayer, 'o', color=colors[-1], markersize=10, label='b_j')
+        plt.xlabel('Layer number')
+        plt.legend()
+
+        
+        # Noise plots
+        plt.figure()
+        plt.loglog(f, np.sqrt(SbrZ), '--')
+        plt.loglog(f, np.sqrt(StoZ))
+        plt.loglog(f, np.sqrt(SteZ), '-.')
+        plt.loglog(f, np.sqrt(StrZ), '-.')
+        plt.legend(['Brownian Noise', 'Thermo-optic Noise', 'TE Component', 'TR Component'])
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('Thermal noise [m/sqrt(Hz)]')
+
+        plt.show()
 
     # Return Noise Summary
     noise_summary = {
