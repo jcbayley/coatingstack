@@ -1,5 +1,7 @@
 import numpy as np
-
+from EFI_tmm import CalculateEFI_tmm
+from YAM_CoatingBrownian import getCoatingThermalNoise
+import copy
 #functions used to Calculate Coating Thermal Noise 
 # not to be used to calculate optical properties 
 
@@ -164,3 +166,247 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     StoZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - np.sum(betaBar * lambda_) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
     
     return SbrZ, StoZ, SteZ, StrZ, brLayer
+
+
+
+def re_integrand(
+    state,
+    EFI,
+    lambda_,
+    num_points=30000,
+    all_materials: dict = {}):
+    ### set up a function to integrate over the total elecric feild intensity as a function of depth 
+    ### t
+    #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
+    #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
+    #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
+    #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
+    #Returns
+    #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
+
+    # Initialize variables
+    depths = []
+    ref_indices = []
+    
+    # Calculate layer thicknesses
+    #if np.shape(materialLayer)[0] != 1:
+        
+    #layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
+    #cumulative_thickness = np.cumsum(layer_thicknesses)
+        
+    
+    #else: 
+    #    cumulative_thickness = layer_thicknesses
+    #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
+
+    # Generate depth points linearly spaced across each layer
+    layer_thicknesses = np.zeros(len(state))
+    cumulative_thickness = np.zeros(len(state))
+    for i,layer in enumerate(state):
+        thickness = layer[0]
+        mat = np.argmax(layer[1:]) + 1
+        material = all_materials[mat]
+        layer_thicknesses[i] = lambda_ / (4 * material['n'])
+        cumulative_thickness[:i+1] += layer_thicknesses[i]
+        start_depth = cumulative_thickness[i] - thickness
+        end_depth = cumulative_thickness[i]
+        num_points_layer = int(num_points * (thickness / cumulative_thickness[-1]))
+
+        layer_depths = np.linspace(start_depth, end_depth, num_points_layer, endpoint=False)
+        layer_ref_indices = np.full(layer_depths.shape, material['n'])
+
+        depths.extend(layer_depths)
+        ref_indices.extend(layer_ref_indices)
+
+    # Adjust the total number of points to be exactly 30,000
+    current_total_points = len(depths)
+    if current_total_points != num_points:
+        adjustment = num_points - current_total_points
+        final_layer_depths = np.linspace(cumulative_thickness[-2], cumulative_thickness[-1], adjustment + len(depths[-adjustment:]), endpoint=False)
+        final_layer_ref_indices = np.full(final_layer_depths.shape, material['n'])
+        depths[-adjustment:] = final_layer_depths
+        ref_indices[-adjustment:] = final_layer_ref_indices
+
+    # Create final array
+    stack_info_array = np.column_stack((depths, ref_indices))
+    #stack_info_array = pd.DataFrame(stack_info_array)
+
+
+    return EFI/stack_info_array[1]
+
+def integrand(EFI,lambda_,materialLayer,materialParams,num_points=30000):
+        ### set up a function to integrate over the total elecric feild intensity as a function of depth 
+        ### t
+        #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
+        #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
+        #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
+        #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
+        #Returns
+        #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
+
+        # Initialize variables
+        depths = []
+        ref_indices = []
+        
+        # Calculate layer thicknesses
+        #if np.shape(materialLayer)[0] != 1:
+            
+        layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
+        cumulative_thickness = np.cumsum(layer_thicknesses)
+            
+        
+        #else: 
+        #    cumulative_thickness = layer_thicknesses
+        #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
+            
+
+        # Generate depth points linearly spaced across each layer
+        for i, thickness in enumerate(layer_thicknesses):
+            start_depth = cumulative_thickness[i] - thickness
+            end_depth = cumulative_thickness[i]
+            num_points_layer = int(num_points * (thickness / cumulative_thickness[-1]))
+
+            layer_depths = np.linspace(start_depth, end_depth, num_points_layer, endpoint=False)
+            layer_ref_indices = np.full(layer_depths.shape, materialParams[materialLayer[i]]['n'])
+
+            depths.extend(layer_depths)
+            ref_indices.extend(layer_ref_indices)
+
+        # Adjust the total number of points to be exactly 30,000
+        current_total_points = len(depths)
+        if current_total_points != num_points:
+            adjustment = num_points - current_total_points
+            final_layer_depths = np.linspace(cumulative_thickness[-2], cumulative_thickness[-1], adjustment + len(depths[-adjustment:]), endpoint=False)
+            final_layer_ref_indices = np.full(final_layer_depths.shape, materialParams[materialLayer[-1]]['n'])
+            depths[-adjustment:] = final_layer_depths
+            ref_indices[-adjustment:] = final_layer_ref_indices
+
+        # Create final array
+        stack_info_array = np.column_stack((depths, ref_indices))
+        #stack_info_array = pd.DataFrame(stack_info_array)
+
+        #print(np.shape(EFI), np.shape(stack_info_array))
+    
+        return EFI/stack_info_array[:,1]
+
+def merit_function(
+        state,
+        all_materials,
+        air_material,
+        w_R=1.0, 
+        w_T=1.0, 
+        w_E=1.0, 
+        w_D=1.0,
+        wBeam = 0.062,              # 6cm beam for aLIGO 
+        laser_wavelength = 1064e-9,          # laser wavelength
+        Temp = 293,                 # temperature - Room temperature 
+        frequency = 100.0,                     # frequencies for plotting
+    ):
+    #set up with default inputs to match aLIGO for testing = this should be modified to allow for varying inputs. 
+    
+    """
+    Calculate the merit function for a given coating configuration.
+    """
+    
+    #n1 = materialParams[np.unique(materialLayer)[0]]['n']
+    #n2 = materialParams[np.unique(materialLayer)[1]]['n']
+        
+    #n_indicies = [n1, n2] * num21 + [1, 2] * num34
+    
+    layer_materials = []
+    layer_thicknesses = np.zeros(len(state))
+    for i,layer in enumerate(state):
+        layer_thicknesses[i] = layer[0]
+        mat = np.argmax(layer[1:]) + 1
+        layer_materials.append(mat)
+    
+
+    new_all_materials = copy.copy(all_materials)
+    new_all_materials.update(air_material)
+
+    #print(new_all_materials.keys())
+    num_points = 200
+
+    E_total, _, PhysicalThickness = CalculateEFI_tmm(
+        layer_thicknesses,
+        materialLayer=layer_materials, 
+        materialParams=new_all_materials,
+        lambda_=laser_wavelength ,
+        t_air=500,
+        polarisation='p' ,
+        plots=False,
+        num_points=num_points)
+    
+    print(E_total)
+    sys.exit()
+    ThermalNoise= getCoatingThermalNoise(
+        layer_thicknesses, 
+        layer_materials, 
+        new_all_materials, 
+        materialSub=1, 
+        lambda_=laser_wavelength, 
+        f=frequency, 
+        wBeam=wBeam, 
+        Temp=Temp,
+        plots =False)
+
+
+
+    if isinstance(ThermalNoise[0]['Frequency'],float):
+        difference_array = np.absolute(ThermalNoise[0]['Frequency']-100)
+        
+        # find the index of minimum element from the array
+        index = difference_array.argmin()
+        
+        ThermalNoise_Total = ThermalNoise[0]['BrownianNoise'][index]
+        #use only the thermal noise at the specified frequency = default : 100 Hz 
+    else:
+        
+        ThermalNoise_Total = ThermalNoise[0]['BrownianNoise']
+
+
+    # Total Thickness
+    D = PhysicalThickness[-1]
+    
+    normallised_EFI = integrand(E_total,laser_wavelength,layer_materials,all_materials,num_points=num_points)
+    #normallised_EFI = integrand(state,E_total,laser_wavelength,num_points=30000)
+    
+    depths = np.linspace(0, D, len(normallised_EFI))
+
+    # Perform the integration using the trapezoidal rule
+    E_integrated = np.trapz(normallised_EFI, depths)
+    
+    n_layer = np.array([all_materials[mat]["n"] for mat in layer_materials])
+    
+    nSub = 1 
+    
+    # Reflectivity
+    R, dcdp, rbar, r = getCoatRefl2(1, nSub, n_layer, layer_thicknesses)
+    
+    R = np.real(R)
+
+    """
+    # Clear the previous output (the number of spaces should cover the previous line)
+    print("\r" + " " * 50, end="\r")
+
+    # Merit Function
+    print(f"{'Parameter':<10}{'Value':<10}")
+    print(f"{'R':<10}{R:<10.5f}")
+    print(f"{'CTN':<10}{ThermalNoise_Total:<10.2e}")
+    print(f"{'E':<10}{(1/100 * E_integrated):<10.2f}")
+    print(f"{'D':<10}{(D):<10.2f}")
+    """
+
+    R_scaled =  w_R * (R)
+    CTN_scaled = w_T * (ThermalNoise_Total/(5.92672659826259e-21))
+    EFI_scaled =  w_E * (1/10 * E_integrated)   
+    thick_scaled = w_D * (1/4 * np.log10(D))
+
+    print(R_scaled, CTN_scaled, EFI_scaled, thick_scaled)
+    
+    M = w_R * (1/R) + w_T * ThermalNoise_Total + w_E * (1/E_integrated) + w_D * D
+    
+    M_scaled = 1/(R_scaled + CTN_scaled + EFI_scaled + thick_scaled)
+    
+    #return M_scaled, R_scaled , CTN_scaled , EFI_scaled , thick_scaled
+    return M, M_scaled,R, ThermalNoise_Total, E_integrated,D

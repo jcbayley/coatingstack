@@ -30,10 +30,10 @@ class StatePool():
         Returns:
             array: array of sorted state values
         """
-        state_values = []
+        state_values = np.zeros((self.n_states, 2))
         for i in range(self.n_states):
             temp_stval = self.environment.compute_state_value(self.current_states[i])
-            state_values.append((i,temp_stval))
+            state_values[i] = [i,temp_stval]
 
         sorted_state_values = sorted(state_values, key=lambda a: -a[1])
 
@@ -163,10 +163,11 @@ if __name__ == '__main__':
             'C': 1.64e6,
             'Y': 72e9,
             'prat': 0.17,
-            'phiM': 4.6e-5
+            'phiM': 4.6e-5,
+            'k'   : 0 # right now assuming absorption of silica at 1064 is negligable. 
         },
         2: {
-            'name': 'ta2o5',
+            'name': 'Ta2O5',
             'n': 2.07,
             'a': 2,
             'alpha': 3.6e-6,
@@ -175,21 +176,22 @@ if __name__ == '__main__':
             'C': 2.1e6,
             'Y': 140e9,
             'prat': 0.23,
-            'phiM': 2.44e-4
-        },
-        3: {
-            'name': 'newmat',
-            'n': 2.6,
-            'a': 2,
-            'alpha': 3.7e-6,
-            'beta': 18e-6,
-            'kappa': 32,
-            'C': 2.1e6,
-            'Y': 140e9,
-            'prat': 0.43,
-            'phiM': 8.44e-4
+            'phiM': 2.44e-4,
+            'k'   : 1E-4 #measured by S.Tait for RLVIP tantala  at 1064nm  
         },
     }
+    air_material = {999:{
+                'name': 'air', 
+                'n'   : 1,
+                'alpha': np.NaN,
+                'beta': np.NaN,
+                'kappa': np.NaN,
+                'C': np.NaN,
+                'Y': np.NaN,
+                'prat': np.NaN,
+                'phiM': np.NaN
+            }
+        }
 
     thickness_options = [-0.1,-0.01,-0.001,0.0,0.001,0.01,0.1]
 
@@ -198,13 +200,14 @@ if __name__ == '__main__':
         min_thickness, 
         max_thickness, 
         materials, 
+        air_material,
         thickness_options=thickness_options)
     
     num_iterations = 2000
     statepool = StatePool(
         env, 
-        n_states=5000, 
-        states_fraction_keep = 0.3)
+        n_states=500, 
+        states_fraction_keep = 0.2)
 
     filename = os.path.join(root_dir,'coating.png')
     scores = []

@@ -1,17 +1,37 @@
 import torch
 import numpy as np
-from coating_utils import getCoatAbsorption, getCoatNoise2, getCoatRefl2
+from coating_utils import getCoatAbsorption, getCoatNoise2, getCoatRefl2, merit_function
 import time
 
 class CoatingStack():
 
-    def __init__(self, max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False):
+    def __init__(
+            self, 
+            max_layers, 
+            min_thickness, 
+            max_thickness, 
+            materials, 
+            air_material,
+            thickness_options=[0.1,1,10], 
+            variable_layers=False):
+        """_summary_
+
+        Args:
+            max_layers (_type_): _description_
+            min_thickness (_type_): _description_
+            max_thickness (_type_): _description_
+            materials (_type_): _description_
+            air_material (_type_): _description_
+            thickness_options (list, optional): _description_. Defaults to [0.1,1,10].
+            variable_layers (bool, optional): _description_. Defaults to False.
+        """
         self.variable_layers = variable_layers
         self.max_layers = max_layers
         self.thickness_options = thickness_options
         self.min_thickness = min_thickness
         self.max_thickness = max_thickness
         self.materials = materials
+        self.air_material = air_material
         self.n_materials = len(materials)
         self.n_thickness = len(self.thickness_options)
         self.n_actions = self.max_layers*self.n_materials*self.n_thickness
@@ -110,7 +130,14 @@ class CoatingStack():
         return action
 
     
-    def compute_state_value(self, state, material_sub=1, lambda_=1064E-9, f=100, wBeam=0.062, Temp=293):
+    def compute_state_value(
+            self, 
+            state, 
+            material_sub=1, 
+            laser_wavelength=1064E-9, 
+            frequency=100, 
+            wBeam=0.062, 
+            Temp=293):
         """_summary_
 
         Args:
@@ -126,7 +153,8 @@ class CoatingStack():
             _type_: stuff
         """
 
-        # Extract substrate properties
+        """
+        # Exact substrate properties
         nSub = self.materials[material_sub]['n']
         ySub = self.materials[material_sub]['Y']
         pratSub = self.materials[material_sub]['prat']
@@ -172,12 +200,7 @@ class CoatingStack():
         
         aligoCTN = 2.4E-24 
 
-        """
-        if rCoat<0: 
-            rCoat = -1
-        else:
-            rCoat = np.log(rCoat)
-        """ 
+
         
         stat = rCoat - 1e-3*(SbrZ/ aligoCTN)
         
@@ -189,11 +212,21 @@ class CoatingStack():
         else:    
             return stat
         """
-        if np.any(d_opt > self.max_thickness) or np.any(d_opt < self.min_thickness):
-            return -1e5
-        else:
-            return stat
-        """
+       
+        M, M_scaled,R, ThermalNoise_Total, E_integrated,D = merit_function(
+            state,
+            self.materials,
+            self.air_material,
+            laser_wavelength=laser_wavelength,
+            frequency=frequency,
+            wBeam=wBeam,
+            Temp=Temp
+            )
+        
+        if np.isnan(M_scaled):
+            M_scaled = -100
+    
+        return M_scaled
 
     def compute_reward(self, new_state, old_state):
         """reward is the improvement of the state over the previous one
@@ -359,3 +392,4 @@ if __name__ == "__main__":
     # Print a sample of valid arrangements (to avoid printing too many)
     for arrangement in valid_arrangements[:10]:
         print(arrangement)
+
