@@ -320,7 +320,7 @@ def merit_function(
         mat = np.argmax(layer[1:]) + 1
         layer_materials.append(mat)
     
-
+    layer_materials = np.array(layer_materials, dtype=np.int32)
     new_all_materials = copy.copy(all_materials)
     new_all_materials.update(air_material)
 
@@ -337,8 +337,6 @@ def merit_function(
         plots=False,
         num_points=num_points)
     
-    print(E_total)
-    sys.exit()
     ThermalNoise= getCoatingThermalNoise(
         layer_thicknesses, 
         layer_materials, 
@@ -402,7 +400,7 @@ def merit_function(
     EFI_scaled =  w_E * (1/10 * E_integrated)   
     thick_scaled = w_D * (1/4 * np.log10(D))
 
-    print(R_scaled, CTN_scaled, EFI_scaled, thick_scaled)
+    #print(R_scaled, CTN_scaled, EFI_scaled, thick_scaled)
     
     M = w_R * (1/R) + w_T * ThermalNoise_Total + w_E * (1/E_integrated) + w_D * D
     

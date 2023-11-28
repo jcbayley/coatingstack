@@ -406,6 +406,19 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     return SbrZ, StoZ, SteZ, StrZ, brLayer
 
 def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, lambda_=1, f=1, wBeam=1, Temp=1,plots=True):
+    """_summary_
+
+    Args:
+        dOpt (_type_): In quarter wavelengths
+        materialLayer (_type_): _description_
+        materialParams (_type_): _description_
+        materialSub (int, optional): _description_. Defaults to 1.
+        lambda_ (int, optional): _description_. Defaults to 1.
+        f (int, optional): _description_. Defaults to 1.
+        wBeam (int, optional): _description_. Defaults to 1.
+        Temp (int, optional): _description_. Defaults to 1.
+        plots (bool, optional): _description_. Defaults to True.
+    """
     # Set seaborn style and viridis color palette
     sns.set_style("whitegrid")
     sns.set_palette("tab10")

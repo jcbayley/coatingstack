@@ -41,7 +41,7 @@ def CalculateEFI_tmm(
     n_air     = materialParams[999]['n']
     
     # set up coating 
-    
+
     n_coat = np.zeros(np.shape(dOpt))                                                    # refractive index of each layer 
     n_coat[np.where(materialLayer==1)] = materialParams[1]['n']
     n_coat[np.where(materialLayer==2)] = materialParams[2]['n']
@@ -50,6 +50,7 @@ def CalculateEFI_tmm(
     t_coat[np.where(materialLayer==1)] = wavelength / (4 * materialParams[1]['n'])       # physical thickness of each layer in nm 
     t_coat[np.where(materialLayer==2)] = wavelength / (4 * materialParams[2]['n']) 
     
+
     k_coat= np.zeros(np.shape(dOpt))
     k_coat[np.where(materialLayer==1)] = materialParams[1]['k']                         # attenuation coefficents for each layer  ,
     k_coat[np.where(materialLayer==2)] = materialParams[2]['k']
@@ -121,10 +122,10 @@ def CalculateEFI_tmm(
             ax1.bar(depth_so_far + t_coat[i] / 2, t_coat[i], color=colors[material_idx],
                     width=t_coat[i])
             depth_so_far += t_coat[i]
-        ax1.set_xlim([0, sum(t_coat) * 1.01])
+        #ax1.set_xlim([0, sum(t_coat) * 1.01])
         ax1.set_ylabel('Physical Thickness [nm]')
         ax1.set_xlabel('Layer Position')
-        ax1.set_xlim([-t_air,np.sum(t_coat)])
+        #ax1.set_xlim([-t_air,np.sum(t_coat)])
         ax1.set_title('Generated Stack')
         ax1.grid(False)
         
@@ -134,9 +135,9 @@ def CalculateEFI_tmm(
         ax2.plot(ds,E_sub,'blue') #,ds,Ey,'purple',ds,absor*200,
         ax2.set_xlabel('depth (nm')
         ax2.set_ylabel('Normallised Electric Feild Intensity')
-        ax2.set_xlim([-t_air,np.sum(t_coat)])
+        #ax2.set_xlim([-t_air,np.sum(t_coat)])
         #plt.vlines([0,t_coat,total_thickness],0,2)
-        ax2.set_ylim([0,np.max(E_sub)*1.2])
+        #ax2.set_ylim([0,np.max(E_sub)*1.2])
         plt.show()
 
     return E_sub, layer_idx,  ds

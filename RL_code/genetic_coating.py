@@ -203,7 +203,7 @@ if __name__ == '__main__':
         air_material,
         thickness_options=thickness_options)
     
-    num_iterations = 2000
+    num_iterations = 20
     statepool = StatePool(
         env, 
         n_states=500, 
