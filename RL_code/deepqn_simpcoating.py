@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from deepqn_cart import plotLearning
 import copy 
 
+
 class Environment():
 
     def __init__(self, max_layers, min_thickness, max_thickness, materials, thickness_options=[0.1,1,10], variable_layers=False):
