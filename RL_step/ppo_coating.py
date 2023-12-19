@@ -22,7 +22,9 @@ class Actor(nn.Module):
         self.num_materials = num_materials
         self.hidden_size = hidden_size
         self.n_hidden = n_hidden
-        self.linearin = nn.Linear(self.state_size, hidden_size)
+        self.convin = nn.Conv2d(1, 16, (3,3), padding="same")
+        self.conv2 = nn.Conv2d(16, 16, (3,3), padding="same")
+        self.linearin = nn.Linear(self.state_size*16, hidden_size)
         #self.linear2 = nn.Linear(128, 256)
         for i in range(self.n_hidden):
             setattr(self, f"linear{i}", nn.Linear(hidden_size, hidden_size))
@@ -31,7 +33,10 @@ class Actor(nn.Module):
         self.linearthick = nn.Linear(hidden_size, 2)
 
     def forward(self, state):
-        output = F.relu(self.linearin(state))
+        output = F.relu(self.convin(state))
+        output = F.relu(self.conv2(output))
+        #print(output.size(), self.state_size)
+        output = F.relu(self.linearin(output.flatten(start_dim=1)))
         for i in range(self.n_hidden):
             output = F.relu(getattr(self, f"linear{i}")(output))
         #output = F.relu(self.linear2(output))
@@ -41,7 +46,7 @@ class Actor(nn.Module):
         scaled_mean = torch.sigmoid(output_thickness[:,0])*(self.max_thickness-self.min_thickness) + self.min_thickness
         thickness_dist = TruncatedNormalDist(
             scaled_mean, 
-            torch.sigmoid(output_thickness[:,1]) + 1e-10, 
+            torch.sigmoid(output_thickness[:,1]) + 1e-18, 
             self.min_thickness, 
             self.max_thickness)
         #thickness_dist = Normal(output_thickness[:,0], torch.sigmoid(output_thickness[:,1]) + 1e-10)
@@ -62,7 +67,7 @@ class Critic(nn.Module):
         self.linearout = nn.Linear(hidden_size, 1)
 
     def forward(self, state):
-        output = F.relu(self.linearin(state))
+        output = F.relu(self.linearin(state.flatten(start_dim=1)))
         #output = F.relu(self.linear2(output))
         for i in range(self.n_hidden):
             output = F.relu(getattr(self, f"linear{i}")(output))
@@ -139,7 +144,16 @@ def plot_score(end_scores, max_scores, fname=None):
     if fname is not None:
         fig.savefig(fname)
 
-def trainIters(actor, critic, environment, n_iters, optimiserA, optimiserC, device="cpu", root_dir="./"):
+def trainIters(
+        actor, 
+        critic, 
+        environment, 
+        n_iters, 
+        optimiserA, 
+        optimiserC, 
+        device="cpu", 
+        root_dir="./",
+        ppo_loss = True):
     #optimizerA = optim.Adam(actor.parameters())
     #optimizerC = optim.Adam(critic.parameters())
 
@@ -156,71 +170,95 @@ def trainIters(actor, critic, environment, n_iters, optimiserA, optimiserC, devi
     figvals, axvals = plt.subplots()
     figret, axret = plt.subplots()
     max_state = -100
+    old_actor = copy.deepcopy(actor)
     for iter in range(n_iters):
-        state = environment.reset().flatten()
+        state = environment.reset()#.flatten()
         log_probs = []
         values = []
         rewards = []
         state_vals = []
         masks = []
+        ratios = []
         entropy = 0
-        environment.reset()
+        advantages = []
+        allreturns = []
+        for nrepeat in range(10):
+            environment.reset()
+            t_rewards = []
+            t_masks = []
+            for i in count():
+                #env.render()
+                state = torch.FloatTensor(state).to(device)
+                dist, value = actor(state.unsqueeze(0).unsqueeze(0)), critic(state.unsqueeze(0).unsqueeze(0))
+                if i == 0:
+                    mat_probs = dist[1].log_prob(torch.from_numpy(np.array([0,1,2])))
+                    all_mat_probs.append(mat_probs.detach().cpu().numpy())
+                material_change = dist[1].sample()
+                thickness_change = dist[0].sample()
+                action = [thickness_change,material_change]
+                next_state, reward, done, new_value = environment.step(action, 0)
 
-        for i in count():
-            #env.render()
-            state = torch.FloatTensor(state).to(device)
-            dist, value = actor(state.unsqueeze(0)), critic(state.unsqueeze(0))
-            if i == 0:
-                mat_probs = dist[1].log_prob(torch.from_numpy(np.array([0,1,2])))
-                all_mat_probs.append(mat_probs.detach().cpu().numpy())
-            material_change = dist[1].sample()
-            thickness_change = dist[0].sample()
-            action = [thickness_change,material_change]
-            next_state, reward, done, new_value = environment.step(action, 0)
+                state_vals.append(new_value)
 
-            state_vals.append(new_value)
+                try:
+                    log_prob = dist[0].log_prob(action[0]).unsqueeze(0) + dist[1].log_prob(action[1]).unsqueeze(0)
+                except:
+                    print(action[0].detach().cpu().numpy())
+                    print(thickness_change)
+                    print(dist[0]._mean)
+                    print(dist[0]._variance)
+                    sys.exit()
 
-            try:
-                log_prob = dist[0].log_prob(action[0]).unsqueeze(0) + dist[1].log_prob(action[1]).unsqueeze(0)
-            except:
-                print(action[0].detach().cpu().numpy())
-                print(thickness_change)
-                print(dist[0]._mean)
-                print(dist[0]._variance)
-                sys.exit()
-            #entropy += dist[0].entropy().mean() + dist[1].entropy().mean()
+                if ppo_loss:
+                    old_dist = old_actor(state.unsqueeze(0).unsqueeze(0))
+                    old_log_prob = old_dist[0].log_prob(action[0]).unsqueeze(0) + old_dist[1].log_prob(action[1]).unsqueeze(0)
+                    ratios.append((log_prob - old_log_prob).exp())
+                #entropy += dist[0].entropy().mean() + dist[1].entropy().mean()
 
-            log_probs.append(log_prob)
-            values.append(value)
-            rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
-            masks.append(torch.tensor([1-done], dtype=torch.float, device=device))
+                log_probs.append(log_prob)
+                values.append(value)
+                t_rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
+                t_masks.append(torch.tensor([1-done], dtype=torch.float, device=device))
+                
+                state = next_state#.flatten()
+
+                if done:
+                    #print('Iteration: {}, Score: {}'.format(iter, i))
+                    episode_durations.append(i + 1) 
+                    final_state_value = environment.compute_state_value(environment.current_state)
+                    #print(final_state_value)
+                    break
+
+            if final_state_value > max_state:
+                max_state = final_state_value   
             
-            state = next_state.flatten()
+            rewards.append(np.mean(t_rewards))
+            episode_end_scores.append(state_vals[-1])
+            episode_max_scores.append(np.max(state_vals))
 
-            if done:
-                #print('Iteration: {}, Score: {}'.format(iter, i))
-                episode_durations.append(i + 1) 
-                final_state_value = environment.compute_state_value(environment.current_state)
-                #print(final_state_value)
-                break
+            next_state = torch.FloatTensor(next_state).to(device)
+            next_value = critic(next_state.unsqueeze(0).unsqueeze(0))#.flatten())
+            returns = compute_returns(next_value, t_rewards, t_masks)
+            allreturns.extend(returns)
 
-        if final_state_value > max_state:
-            max_state = final_state_value   
-        
-        episode_end_scores.append(state_vals[-1])
-        episode_max_scores.append(np.max(state_vals))
-
-        next_state = torch.FloatTensor(next_state).to(device)
-        next_value = critic(next_state.flatten())
-        returns = compute_returns(next_value, rewards, masks)
         log_probs = torch.cat(log_probs)
-        returns = torch.cat(returns).detach()
+
+        returns = torch.cat(allreturns).detach()
         values = torch.cat(values)
 
+        advantage = returns - values.squeeze()
+        #print("rsize: ", np.shape(returns), "vsize: ", np.shape(values))
 
-        advantage = returns - values
+        if ppo_loss:
+            clip_coef = 0.1
+            ratios = torch.cat(ratios)
+            ppo_loss1 = -(advantage.detach() * ratios)
+            ppo_loss2 = -advantage.detach() * torch.clamp(ratios, 1 - clip_coef, 1 + clip_coef)
+            actor_loss = torch.max(ppo_loss1, ppo_loss2).mean()
 
-        actor_loss = -(log_probs * advantage.detach()).mean()
+        else:
+            actor_loss = -(log_probs * advantage.detach()).mean()
+
         critic_loss = advantage.pow(2).mean()
         actor_losses.append(actor_loss.item())
         critic_losses.append(critic_loss.item())
@@ -232,6 +270,9 @@ def trainIters(actor, critic, environment, n_iters, optimiserA, optimiserC, devi
         optimiserA.step()
         optimiserC.step()
 
+        if ppo_loss:
+            old_actor.load_state_dict(actor.state_dict())
+
         if iter % 100 == 0 and iter > 0:
             #plot_durations(episode_durations, root_dir) 
             plot_rewards(iter, rewards, fig, ax)
@@ -241,7 +282,7 @@ def trainIters(actor, critic, environment, n_iters, optimiserA, optimiserC, devi
 
             #plot_values(iter, state_vals, values.detach().numpy(), fig=figvals, ax=axvals)
             #figvals.savefig(os.path.join(root_dir, "values_state.png"))
-
+            #print(np.shape(returns), np.shape(values))
             plot_values(iter, returns, values.detach().numpy(), fig=figret, ax=axret)
             figret.savefig(os.path.join(root_dir, "values.png"))
 
@@ -293,7 +334,7 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
     final_state_values = []
     max_state = -100
     for iter in range(n_starts):
-        state = environment.reset().flatten()
+        state = environment.reset()#.flatten()
         log_probs = []
         values = []
         rewards = []
@@ -307,7 +348,7 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
             #env.render()
             #print(environment.current_index)
             state = torch.FloatTensor(state).to(device)
-            dist, value = actor(state.unsqueeze(0)), critic(state.unsqueeze(0))
+            dist, value = actor(state.unsqueeze(0).unsqueeze(0)), critic(state.unsqueeze(0).unsqueeze(0))
             material_change = dist[1].sample()
             thickness_change = dist[0].sample()
             action = [thickness_change,material_change]
@@ -329,7 +370,7 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
             masks.append(1-done)
             all_states.append(next_state)
             
-            state = next_state.flatten()
+            state = next_state#.flatten()
 
             if done:
                 #print('Iteration: {}, Score: {}'.format(iter, i))
@@ -383,11 +424,11 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
     return final_states, final_rewards, final_values
 
 if __name__ == "__main__":
-    root_dir = "./actorcritic_output_low_lr"
+    root_dir = "./actorcritic_output_ppo_multirun10_conv"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
-    n_layers = 20
+    n_layers = 10
     min_thickness = 0.01
     max_thickness = 1
     load_model = False
@@ -439,12 +480,12 @@ if __name__ == "__main__":
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 200000
+    num_iterations = 60000
 
     device = "cpu"
 
-    actor = Actor(env.state_space_size, env.n_materials, hidden_size=128, n_hidden=3, thickness_range=(min_thickness, max_thickness)).to(device)
-    critic = Critic(env.state_space_size, env.n_materials, hidden_size=128, n_hidden=3).to(device)
+    actor = Actor(env.state_space_size, env.n_materials, hidden_size=32, n_hidden=2, thickness_range=(min_thickness, max_thickness)).to(device)
+    critic = Critic(env.state_space_size, env.n_materials, hidden_size=32, n_hidden=2).to(device)
 
     if load_model:
         model_check = torch.load(os.path.join(root_dir, "checkpoint_model.pt"))
@@ -453,8 +494,8 @@ if __name__ == "__main__":
     #actor = Actor(env.state_space_size, env.n_actions).to(device)
     #critic = Critic(env.state_space_size, env.n_actions).to(device)
 
-    optimiserA = optim.Adam(actor.parameters(), lr=5e-6)
-    optimiserC = optim.Adam(critic.parameters(), lr=5e-6)
+    optimiserA = optim.Adam(actor.parameters(), lr=1e-5)
+    optimiserC = optim.Adam(critic.parameters(), lr=1e-5)
 
     trainIters(
         actor, 
