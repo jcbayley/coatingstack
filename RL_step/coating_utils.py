@@ -235,59 +235,59 @@ def re_integrand(
     return EFI/stack_info_array[1]
 
 def integrand(EFI,lambda_,materialLayer,materialParams,num_points=30000):
-        ### set up a function to integrate over the total elecric feild intensity as a function of depth 
-        ### t
-        #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
-        #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
-        #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
-        #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
-        #Returns
-        #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
+    ### set up a function to integrate over the total elecric feild intensity as a function of depth 
+    ### t
+    #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
+    #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
+    #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
+    #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
+    #Returns
+    #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
 
-        # Initialize variables
-        depths = []
-        ref_indices = []
-        
-        # Calculate layer thicknesses
-        #if np.shape(materialLayer)[0] != 1:
-            
-        layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
-        cumulative_thickness = np.cumsum(layer_thicknesses)
-            
-        
-        #else: 
-        #    cumulative_thickness = layer_thicknesses
-        #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
-            
-
-        # Generate depth points linearly spaced across each layer
-        for i, thickness in enumerate(layer_thicknesses):
-            start_depth = cumulative_thickness[i] - thickness
-            end_depth = cumulative_thickness[i]
-            num_points_layer = int(num_points * (thickness / cumulative_thickness[-1]))
-
-            layer_depths = np.linspace(start_depth, end_depth, num_points_layer, endpoint=False)
-            layer_ref_indices = np.full(layer_depths.shape, materialParams[materialLayer[i]]['n'])
-
-            depths.extend(layer_depths)
-            ref_indices.extend(layer_ref_indices)
-
-        # Adjust the total number of points to be exactly 30,000
-        current_total_points = len(depths)
-        if current_total_points != num_points:
-            adjustment = num_points - current_total_points
-            final_layer_depths = np.linspace(cumulative_thickness[-2], cumulative_thickness[-1], adjustment + len(depths[-adjustment:]), endpoint=False)
-            final_layer_ref_indices = np.full(final_layer_depths.shape, materialParams[materialLayer[-1]]['n'])
-            depths[-adjustment:] = final_layer_depths
-            ref_indices[-adjustment:] = final_layer_ref_indices
-
-        # Create final array
-        stack_info_array = np.column_stack((depths, ref_indices))
-        #stack_info_array = pd.DataFrame(stack_info_array)
-
-        #print(np.shape(EFI), np.shape(stack_info_array))
+    # Initialize variables
+    depths = []
+    ref_indices = []
     
-        return EFI/stack_info_array[:,1]
+    # Calculate layer thicknesses
+    #if np.shape(materialLayer)[0] != 1:
+        
+    layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
+    cumulative_thickness = np.cumsum(layer_thicknesses)
+        
+    
+    #else: 
+    #    cumulative_thickness = layer_thicknesses
+    #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
+        
+
+    # Generate depth points linearly spaced across each layer
+    for i, thickness in enumerate(layer_thicknesses):
+        start_depth = cumulative_thickness[i] - thickness
+        end_depth = cumulative_thickness[i]
+        num_points_layer = int(num_points * (thickness / cumulative_thickness[-1]))
+
+        layer_depths = np.linspace(start_depth, end_depth, num_points_layer, endpoint=False)
+        layer_ref_indices = np.full(layer_depths.shape, materialParams[materialLayer[i]]['n'])
+
+        depths.extend(layer_depths)
+        ref_indices.extend(layer_ref_indices)
+
+    # Adjust the total number of points to be exactly 30,000
+    current_total_points = len(depths)
+    if current_total_points != num_points:
+        adjustment = num_points - current_total_points
+        final_layer_depths = np.linspace(cumulative_thickness[-2], cumulative_thickness[-1], adjustment + len(depths[-adjustment:]), endpoint=False)
+        final_layer_ref_indices = np.full(final_layer_depths.shape, materialParams[materialLayer[-1]]['n'])
+        depths[-adjustment:] = final_layer_depths
+        ref_indices[-adjustment:] = final_layer_ref_indices
+
+    # Create final array
+    stack_info_array = np.column_stack((depths, ref_indices))
+    #stack_info_array = pd.DataFrame(stack_info_array)
+
+    #print(np.shape(EFI), np.shape(stack_info_array))
+
+    return EFI/stack_info_array[:,1]
 
 def merit_function(
         state,

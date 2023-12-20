@@ -9,7 +9,7 @@ import time
 import matplotlib.pyplot as plt
 from deepqn_cart import plotLearning
 import copy 
-from environments import CoatingStack
+from simple_environment import CoatingStack
 
 class ReplayBuffer(object):
     def __init__(self, max_size, input_shape, n_actions):

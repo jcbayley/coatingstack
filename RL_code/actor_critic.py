@@ -9,7 +9,7 @@ import time
 import matplotlib.pyplot as plt
 from deepqn_cart import plotLearning
 import copy 
-from environments import CoatingStack
+from simple_environment import CoatingStack
 from itertools import count
 from torch.distributions import Categorical
 import plotting
@@ -154,6 +154,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
     episode_durations = []
     episode_median_scores = []
     episode_end_scores = []
+    episode_max_scores = []
     fig, ax = plt.subplots()
     figval, axval = plt.subplots()
     figvals, axvals = plt.subplots()
@@ -167,14 +168,18 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
         masks = []
         entropy = 0
         env.reset()
+        max_state = -100
 
         for i in count():
             #env.render()
             state = torch.FloatTensor(state).to(device)
             dist, value = actor(state), critic(state)
             action = dist.sample()
-            next_state, reward, done, new_value = env.step(action.cpu().numpy())
+            next_state, reward, done, new_value = env.step(action.cpu().numpy(), max_state)
             
+            if new_value > max_state:
+                max_state = new_value
+
             state_vals.append(new_value)
 
             log_prob = dist.log_prob(action).unsqueeze(0)
@@ -187,14 +192,14 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             
             state = next_state.flatten()
 
-            if done or i > 1000:
+            if done or i > 5000:
                 #print('Iteration: {}, Score: {}'.format(iter, i))
                 episode_durations.append(i + 1) 
                 break
 
         
         episode_end_scores.append(state_vals[-1])
-        episode_median_scores.append(np.max(state_vals))
+        episode_max_scores.append(np.max(state_vals))
 
         next_state = torch.FloatTensor(next_state).to(device)
         next_value = critic(next_state.flatten())
@@ -216,7 +221,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
         optimiserA.step()
         optimiserC.step()
 
-        if iter % 1000 == 0 and iter > 0:
+        if iter % 100 == 0 and iter > 0:
             plot_durations(episode_durations, root_dir) 
             plot_rewards(iter, rewards, fig, ax)
             fig.savefig(os.path.join(root_dir, "rewards.png"))
@@ -229,7 +234,7 @@ def trainIters(actor, critic, n_iters, optimiserA, optimiserC, device="cpu", roo
             plot_values(iter, returns, values.detach().numpy(), fig=figret, ax=axret)
             figret.savefig(os.path.join(root_dir, "values.png"))
 
-            plot_score(episode_end_scores, episode_median_scores, fname=os.path.join(root_dir, "running_scores.png"))
+            plot_score(episode_end_scores, episode_max_scores, fname=os.path.join(root_dir, "running_scores.png"))
 
 
         if iter % 100 == 0:
@@ -281,7 +286,7 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
             action = dist.sample()
             # get most likely action each time
             #action = torch.argmax(dist.log_prob(torch.arange(env.n_actions)))
-            next_state, reward, done, new_value = env.step(action.cpu().numpy())
+            next_state, reward, done, new_value = env.step(action.cpu().numpy(), 0)
 
             log_prob = dist.log_prob(action).unsqueeze(0)
             entropy += dist.entropy().mean()
@@ -295,7 +300,7 @@ def test_model(actor,critic, n_starts, n_layers=5, root_dir="./"):
             
             state = next_state.flatten()
 
-            if done or i > 1000:
+            if done or i > 5000:
                 #print('Iteration: {}, Score: {}'.format(iter, i))
                 break
 
@@ -378,7 +383,7 @@ if __name__ == '__main__':
         },
     }
 
-    thickness_options = [-0.1,-0.01,0.01,0.1]
+    thickness_options = [0.0]
 
     env = CoatingStack(
         n_layers, 
@@ -387,7 +392,7 @@ if __name__ == '__main__':
         materials, 
         thickness_options=thickness_options)
     
-    num_iterations = 20000
+    num_iterations = 1000
 
     device = "cpu"
 
