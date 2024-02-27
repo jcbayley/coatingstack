@@ -11,8 +11,8 @@ class CoatingStack():
             min_thickness, 
             max_thickness, 
             materials, 
-            air_material=None,
-            thickness_options=[0.1,1,10], 
+            air_material_index=0,
+            substrate_material_index=1,
             variable_layers=False):
         """_summary_
 
@@ -27,21 +27,19 @@ class CoatingStack():
         """
         self.variable_layers = variable_layers
         self.max_layers = max_layers
-        self.thickness_options = thickness_options
         self.min_thickness = min_thickness
         self.max_thickness = max_thickness
         self.materials = materials
-        self.air_material = air_material
         self.n_materials = len(materials)
-        self.n_thickness = len(self.thickness_options)
-        self.n_actions = self.max_layers*self.n_materials*self.n_thickness
+        self.air_material_index = air_material_index
+        self.substrate_material_index = substrate_material_index
 
         # state space size is index for each material (onehot encoded) plus thickness of each material
         self.state_space_size = self.max_layers*self.n_materials + self.max_layers
 
         self.length = 0
         self.current_state = self.sample_state_space()
-        self.current_index = 0
+        self.current_index = self.max_layers - 1
         self.previous_material = -1
 
     def reset(self,):
@@ -49,7 +47,7 @@ class CoatingStack():
         """
         self.length = 0
         self.current_state = self.sample_state_space()
-        self.current_index = 0
+        self.current_index = self.max_layers - 1
 
         return self.current_state
     
@@ -64,8 +62,8 @@ class CoatingStack():
             _type_: _description_
         """
         layers = np.zeros((self.max_layers, self.n_materials + 1))
-        layers[:,1] = 1
-        layers[:,0] = self.min_thickness
+        layers[:,self.air_material_index+1] = 1
+        layers[:,0] = np.random.uniform(self.min_thickness, self.max_thickness, size=len(layers[:,0]))
         return layers
 
     def sample_action_space(self, ):
@@ -83,7 +81,7 @@ class CoatingStack():
 
     
         
-    def sample_action_space(self, ):
+    def sample_action_space2(self, ):
         """sample from the action space
 
         Returns:
@@ -94,13 +92,12 @@ class CoatingStack():
         material = torch.random.randint(0,self.n_materials)
         thickness = torch.random.uniform(self.min_thickness, self.max_thickness)
         return thickness, material
-
     
     def compute_state_value(
             self, 
             state, 
             material_sub=1, 
-            laser_wavelength=1064E-9, 
+            light_wavelength=1064E-9, 
             frequency=100, 
             wBeam=0.062, 
             Temp=293):
@@ -119,17 +116,32 @@ class CoatingStack():
             _type_: stuff
         """
 
-        m, m_scaled,R, ThermalNoise_Total, E_integrated,D = merit_function(
-            state,
+        
+        # trim out the duplicate air layers
+        state_trim = []
+        for layer in state:
+            material_ind = np.argmax(layer[1:])
+            if material_ind == 0:
+                continue
+            else:
+                state_trim.append(layer)
+        
+        if len(state_trim) == 0:
+            state_trim = np.array([[self.min_thickness, 0, 1, 0], ])
+
+        m, m_scaled, R, ThermalNoise_Total, E_integrated,D = merit_function(
+            np.array(state_trim),
             self.materials,
-            self.air_material,
-            laser_wavelength=laser_wavelength,
+            light_wavelength=light_wavelength,
             frequency=frequency,
             wBeam=wBeam,
-            Temp=Temp
+            Temp=Temp,
+            substrate_index = self.substrate_material_index,
+            air_index = self.air_material_index
             )
-    
-        return m_scaled
+        
+     
+        return R
 
     def compute_reward(self, new_state, max_value=0.0):
         """reward is the improvement of the state over the previous one
@@ -181,19 +193,22 @@ class CoatingStack():
             
 
         new_state = self.update_state(np.copy(self.current_state), action)
-      
+
         reward = 0
         reward_diff, reward, new_value = self.compute_reward(new_state, max_state)
 
+        neg_reward = -10
 
         terminated = False
         #print(torch.any((self.current_state[0] + actions[2]) < self.min_thickness))
         if thickness_change <=0:
             terminated=True
-            reward = -0.1
-        elif self.current_index >= self.max_layers-1 or action[1][0] == 0:
+            reward = neg_reward
+            self.current_state = new_state
+        elif self.current_index == 0 or action[1][0] == self.air_material_index:
          #print("out of thickness bounds")
             terminated = True
+            self.current_state = new_state
             #reward_diff, reward, new_value = self.compute_reward(new_state, max_state)
         #elif action[1][0] == self.previous_material:
         #    terminated = True
@@ -202,11 +217,16 @@ class CoatingStack():
             self.current_state = new_state
             #self.current_state_value = reward
 
+        if np.any(np.isinf(new_state)) or np.any(np.isnan(new_state)) or np.isnan(reward):
+            reward = neg_reward
+            terminated = True
+            new_value = neg_reward
+
         self.previous_material = action[1][0]
         #print(new_value)
 
         self.length += 1
-        self.current_index += 1
+        self.current_index -= 1
 
         #print("cind:", self.current_index)
         #print(new_state)

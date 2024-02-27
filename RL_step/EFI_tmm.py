@@ -11,19 +11,21 @@ import numpy as np
 import matplotlib.pyplot as plt 
 
 def CalculateEFI_tmm(
-        dOpt ,
-        materialLayer, 
-        materialParams,
-        lambda_ =1064 ,
+        layer_thicknesses ,
+        layer_materials, 
+        material_parameters,
+        light_wavelength =1064 ,
         t_air = 500,
         polarisation='p' ,
         plots ='False',
-        num_points=20000 ):
+        num_points=20000,
+        air_index = 0,
+        substrate_index = 1):
     
     
     # function calcualtes the normallised electric field intensity inside a thin film coating/coating stack usign tmm. This method 
     # takes into acount of : 
-    # lambda_          the wavelength of light (nm)  incident on the coxating stack         - default =  1064 nm 
+    # light_wavelength          the wavelength of light (nm)  incident on the coxating stack         - default =  1064 nm 
     # t_air            the total thickness of air before the coating stack                 - default = 500 nm 
     # materailParams : Dictionary variable containing the material propeties of each layer in the coating stack (including air) 
     #                  Requires refractive       index values 'n' and complex refractive index values a.k.a attenuation coeffiencts  'k'
@@ -34,55 +36,38 @@ def CalculateEFI_tmm(
     # Author - S.Tait 2023 
     
     
-    wavelength = lambda_ *1E9
+    # wavelength in m
+    wavelength = light_wavelength *1E9
     
     # paramaters of air layer before coating
     
-    n_air     = materialParams[999]['n']
+    n_air     = material_parameters[air_index]['n']
     
-    # set up coating 
-
-    n_coat = np.zeros(np.shape(dOpt))                                                    # refractive index of each layer 
-    n_coat[np.where(materialLayer==1)] = materialParams[1]['n']
-    n_coat[np.where(materialLayer==2)] = materialParams[2]['n']
-    
-    t_coat= np.zeros(np.shape(dOpt)) 
-    t_coat[np.where(materialLayer==1)] = wavelength / (4 * materialParams[1]['n'])       # physical thickness of each layer in nm 
-    t_coat[np.where(materialLayer==2)] = wavelength / (4 * materialParams[2]['n']) 
-    
-
-    k_coat= np.zeros(np.shape(dOpt))
-    k_coat[np.where(materialLayer==1)] = materialParams[1]['k']                         # attenuation coefficents for each layer  ,
-    k_coat[np.where(materialLayer==2)] = materialParams[2]['k']
-    
-    
-    n_coat_complex = np.asarray([complex(n_i,k_i) for n_i, k_i in zip(n_coat,k_coat)])
-    
+    n_coat_complex = np.asarray([complex(material_parameters[i]["n"],material_parameters[i]["k"]) for i in layer_materials])
     # substrate parameters 
     
-    n_sub    = materialParams[1]['n']  # refractive index of silica at the laser wavelength of 1064 nm
+    n_sub    = material_parameters[substrate_index]['n']  # refractive index of silica at the laser wavelength of 1064 nm
     t_sub    = 100  # thickness of substrate in nm 
     
-    total_thickness = t_air + sum(t_coat) + t_sub                             # total thickness of system in  nm 
+    total_thickness = t_air + sum(layer_thicknesses) + t_sub                             # total thickness of system in  nm 
     
     ##################################################
     # set up calculation of EFI 
     #polarisation = 'p'                                            #polarisation of light
     angle      = np.deg2rad(0)                                     #angle of incidence - assuming normal incidence
     
-    n_list     =  np.append(complex(n_air,0),n_coat_complex) 
-    n_list     =  np.append(n_list,complex(n_sub,0))                           # theres definetly a better way to do this 
+    # appending complex refractive index and k values for air and substrate
+    all_refractive_indices = np.concatenate([[complex(n_air, 0)], n_coat_complex, [complex(n_sub, 0)]])
     
     # EFI requires values are wrapped in inf for some reason 
-    t_list     =  np.append(np.inf,t_coat)                         # theres definitely a better way to do this 
-    t_list     =  np.append(t_list,np.inf)
+    # Appending infs to start and end
+    all_thicknesses = np.concatenate([[np.inf], layer_thicknesses, [np.inf]])
     
+    # running 
+    coh_tmm_data = tmm.coh_tmm(polarisation,all_refractive_indices,all_thicknesses,th_0=angle,lam_vac=wavelength) #theta set to 0 (this is for the pump remember)
     
-    #t_listsub  = np.insert(t_listsub,[0,len(t_listsub)],np.inf )  # EFI requires values are wrapped in inf for some reason 
-    coh_tmm_data = tmm.coh_tmm(polarisation,n_list,t_list,th_0=angle,lam_vac=wavelength) #theta set to 0 (this is for the pump remember)
-    coh_tmm_data_sub = tmm.coh_tmm(polarisation,n_list,t_list,th_0=angle,lam_vac=wavelength)
-    
-    ds = np.linspace(-t_air,sum(t_coat)+t_sub,num=num_points) #position in structure
+    # setup array to compute the EFI over, linearly space points throughout structure
+    efi_positions = np.linspace(-t_air,total_thickness-t_air,num=num_points)
     
     poyn=[]
     absor=[]
@@ -93,32 +78,32 @@ def CalculateEFI_tmm(
     layer_idx = []
     
     
-    for d in ds:
-        layer, d_in_layer = tmm.find_in_structure_with_inf(t_list,d)
+    for d in efi_positions:
+        layer, d_in_layer = tmm.find_in_structure_with_inf(all_thicknesses,d)
         data = tmm.position_resolved(layer,d_in_layer,coh_tmm_data)
-        data_sub = tmm.position_resolved(layer,d_in_layer,coh_tmm_data_sub)
+        #data_sub = tmm.position_resolved(layer,d_in_layer,coh_tmm_data_sub)
         poyn.append(data['poyn'])
         absor.append(data['absor'])
         E.append(np.abs(data['Ex'])**2) # Ex is for p-polarisation
-        E_sub.append(np.abs(data_sub['Ex'])**2)
+        #E_sub.append(np.abs(data_sub['Ex'])**2)
         layer_idx.append(layer) 
     
     E     = np.array(E)
-    E_sub = np.array(E_sub)
+    #E_sub = np.array(E_sub)
     poyn  = np.array(poyn) 
     absor = np.array(absor)
     
 
     if plots: 
         # Plotting the thin film stack
-        unique_materials = list(set(n_list))
+        unique_materials = list(set(all_refractive_indices))
         colors = plt.cm.viridis(np.linspace(0, 1, len(unique_materials)))  # generate distinct colors for materials
         
         depth_so_far = 0  # To keep track of where to plot the next bar
         
         fig, ax1 = plt.subplots()
-        for i in range(len(materialLayer)):
-            material_idx = materialLayer[i]
+        for i in range(len(layer_materials)):
+            material_idx = layer_materials[i]
             ax1.bar(depth_so_far + t_coat[i] / 2, t_coat[i], color=colors[material_idx],
                     width=t_coat[i])
             depth_so_far += t_coat[i]
@@ -140,15 +125,15 @@ def CalculateEFI_tmm(
         #ax2.set_ylim([0,np.max(E_sub)*1.2])
         plt.show()
 
-    return E_sub, layer_idx,  ds
+    return E, layer_idx, efi_positions
     
 
-def CalculateAbsorption_tmm(dOpt, materialLayer, materialParams, lambda_=1064, t_air=500, polarisation='p'):
+def CalculateAbsorption_tmm(dOpt, materialLayer, materialParams, light_wavelength=1064, t_air=500, polarisation='p'):
     """
     Calculate the absorption at each position within the layers of a thin film stack using tmm.
     """
 
-    wavelength = lambda_ * 1e-9  # Convert to meters
+    wavelength = light_wavelength * 1e-9  # Convert to meters
 
     # Air layer parameters
     n_air = materialParams[999]['n']
