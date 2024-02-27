@@ -282,14 +282,14 @@ def getCoatRefl2(nIn, nOut, nLayer, dOpt):
     return rCoat, dcdp, rbar, r
 
 
-def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
+def getCoatAbsorption(light_wavelength, layer_thicknesses, layer_absorbtion, layer_refractive_indices, rbar, r):
     """
     Returns coating absorption as a function of depth.
 
     Parameters:
     - lambda_ : wavelength
-    - dOpt : optical thickness/lambda of each layer
-             = geometrical thickness * refractive index/lambda
+    - layer_thicknesses :  thickness= of each layer
+             = optical thickness * lambda/ refractive index
     - aLayer : absorption per unit length in each layer
     - nLayer : refractive index of each layer, ordered input to output (N x 1)
     - rbar : amplitude reflectivity of coating from this layer down
@@ -300,21 +300,20 @@ def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
     - absLayer : absorption contribution from each layer
     - absCoat : coating total absorption = sum(absLayer)
     """
+
+    optical_thickness = layer_thicknesses*layer_refractive_indices/light_wavelength
     
     # Power in each layer
     powerLayer = np.cumprod(np.abs((1 - r[:-1]**2) / (1 + r[:-1] * rbar)**2))
     
     # One-way phases in each layer
-    phi = 2 * np.pi * dOpt
+    phi = 2 * np.pi * optical_thickness
     
     # Average E-field squared in each layer
     rho = (1 + np.abs(rbar)**2) + 2 * (np.sin(phi) / phi) * np.real(rbar * np.exp(1j * phi))
     
-    # Geometrical thickness of each layer
-    dGeo = lambda_ * dOpt / nLayer
-    
     # Compute power weighting for each layer
-    absLayer = aLayer * rho * powerLayer * dGeo
+    absLayer = layer_absorbtion * rho * powerLayer * layer_thicknesses
     
     # Total coating absorption
     absCoat = np.sum(absLayer)
@@ -322,7 +321,7 @@ def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
     return absCoat, absLayer, powerLayer, rho
 
 
-def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, materialLayer, dOpt, dcdp):
+def getCoatNoise2(f, light_wavelength, wBeam, Temp, material_parameters, substrate_index, layer_material_indices, layer_thicknesses, dcdp):
     """
     Returns coating noise as a function of depth.
 
@@ -348,36 +347,36 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     w = 2 * np.pi * f
     
     # Substrate properties
-    alphaSub = materialParams[materialSub]['alpha']
-    cSub = materialParams[materialSub]['C']
-    kappaSub = materialParams[materialSub]['kappa']
-    ySub = materialParams[materialSub]['Y']
-    pratSub = materialParams[materialSub]['prat']
+    alphaSub = material_parameters[substrate_index]['alpha']
+    cSub = material_parameters[substrate_index]['C']
+    kappaSub = material_parameters[substrate_index]['kappa']
+    ySub = material_parameters[substrate_index]['Y']
+    pratSub = material_parameters[substrate_index]['prat']
     
     # Initialize vectors of material properties
-    nN = np.zeros_like(dOpt)
-    aN = np.zeros_like(dOpt)
-    alphaN = np.zeros_like(dOpt)
-    betaN = np.zeros_like(dOpt)
-    kappaN = np.zeros_like(dOpt)
-    cN = np.zeros_like(dOpt)
-    yN = np.zeros_like(dOpt)
-    pratN = np.zeros_like(dOpt)
-    phiN = np.zeros_like(dOpt)
+    nN = np.zeros_like(layer_thicknesses)
+    aN = np.zeros_like(layer_thicknesses)
+    alphaN = np.zeros_like(layer_thicknesses)
+    betaN = np.zeros_like(layer_thicknesses)
+    kappaN = np.zeros_like(layer_thicknesses)
+    cN = np.zeros_like(layer_thicknesses)
+    yN = np.zeros_like(layer_thicknesses)
+    pratN = np.zeros_like(layer_thicknesses)
+    phiN = np.zeros_like(layer_thicknesses)
     
-    for n, mat in enumerate(materialLayer):
-        nN[n] = materialParams[mat]['n']
-        aN[n] = materialParams[mat]['a']
-        alphaN[n] = materialParams[mat]['alpha']
-        betaN[n] = materialParams[mat]['beta']
-        kappaN[n] = materialParams[mat]['kappa']
-        cN[n] = materialParams[mat]['C']
-        yN[n] = materialParams[mat]['Y']
-        pratN[n] = materialParams[mat]['prat']
-        phiN[n] = materialParams[mat]['phiM']
+    for n, mat in enumerate(layer_material_indices):
+        nN[n] = material_parameters[mat]['n']
+        aN[n] = material_parameters[mat]['a']
+        alphaN[n] = material_parameters[mat]['alpha']
+        betaN[n] = material_parameters[mat]['beta']
+        kappaN[n] = material_parameters[mat]['kappa']
+        cN[n] = material_parameters[mat]['C']
+        yN[n] = material_parameters[mat]['Y']
+        pratN[n] = material_parameters[mat]['prat']
+        phiN[n] = material_parameters[mat]['phiM']
     
     # Geometrical thickness of each layer and total
-    dGeo = lambda_ * dOpt / nN
+    dGeo = light_wavelength * layer_thicknesses / nN
     dCoat = np.sum(dGeo)
     
     # Brownian
@@ -392,20 +391,30 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     
     alphaBar = (dGeo / dCoat) * ((1 + pratSub) / (1 - pratN)) * ((1 + pratN) / (1 + pratSub) + (1 - 2 * pratSub) * yN / ySub) * alphaN
     
-    betaBar = (-dcdp) * dOpt * (betaN / nN + alphaN * (1 + pratN) / (1 - pratN))
+    betaBar = (-dcdp) * layer_thicknesses * (betaN / nN + alphaN * (1 + pratN) / (1 - pratN))
     
     # Thermo-elastic
     SteZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
     
     # Thermo-refractive
-    StrZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * np.sum(betaBar * lambda_)**2
+    StrZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * np.sum(betaBar * light_wavelength)**2
     
     # Total thermo-optic
-    StoZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - np.sum(betaBar * lambda_) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
+    StoZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - np.sum(betaBar * light_wavelength) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
     
     return SbrZ, StoZ, SteZ, StrZ, brLayer
 
-def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, lambda_=1, f=1, wBeam=1, Temp=1,plots=True):
+def getCoatingThermalNoise(
+        layer_thicknesses, 
+        layer_material_index, 
+        material_parameters, 
+        substrate_index=1, 
+        air_index=0,
+        light_wavelength=1, 
+        f=1, 
+        wBeam=1, 
+        Temp=1,
+        plots=True):
     """_summary_
 
     Args:
@@ -420,35 +429,39 @@ def getCoatingThermalNoise(dOpt, materialLayer, materialParams, materialSub=1, l
         plots (bool, optional): _description_. Defaults to True.
     """
     # Set seaborn style and viridis color palette
-    sns.set_style("whitegrid")
-    sns.set_palette("tab10")
 
     # Extract substrate properties
-    nSub = materialParams[materialSub]['n']
-    ySub = materialParams[materialSub]['Y']
-    pratSub = materialParams[materialSub]['prat']
+    n_substrate = material_parameters[substrate_index]['n']
+    y_substrate = material_parameters[substrate_index]['Y']
+    prat_substrate = material_parameters[substrate_index]['prat']
+
+    n_air = material_parameters[air_index]['n']
+    y_air = material_parameters[air_index]['Y']
+    prat_air = material_parameters[air_index]['prat']
 
     # Initialize vectors of material properties
    # Initialize vectors of material properties
-    nLayer = np.zeros(len(materialLayer))
-    aLayer = np.zeros(len(materialLayer))
+    layer_refractive_indices = np.zeros(len(layer_material_index))
+    layer_absorbtions = np.zeros(len(layer_material_index))
     
-    for n, mat in enumerate(materialLayer):
-        nLayer[n] = materialParams[mat]['n']
-        aLayer[n] = materialParams[mat]['a']
+    for n, mat in enumerate(layer_material_index):
+        layer_refractive_indices[n] = material_parameters[mat]['n']
+        layer_absorbtions[n] = material_parameters[mat]['a']
     
 
     # Compute reflectivities
-    rCoat, dcdp, rbar, r = getCoatRefl2(1, nSub, nLayer, dOpt)
+    rCoat, dcdp, rbar, r = getCoatRefl2(n_air, n_substrate, layer_refractive_indices, layer_thicknesses)
     #print(rCoat)
 
     # Compute absorption
-    absCoat, absLayer, powerLayer, rho = getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r)
+    absCoat, absLayer, powerLayer, rho = getCoatAbsorption(light_wavelength, layer_thicknesses, layer_absorbtions, layer_refractive_indices, rbar, r)
 
     # Compute brownian and thermo-optic noises
-    SbrZ, StoZ, SteZ, StrZ, brLayer = getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, materialLayer, dOpt, dcdp)
+    SbrZ, StoZ, SteZ, StrZ, brLayer = getCoatNoise2(f, light_wavelength, wBeam, Temp, material_parameters, substrate_index, layer_material_index, layer_thicknesses, dcdp)
     
     if plots ==True: 
+        sns.set_style("whitegrid")
+        sns.set_palette("tab10")
         # Plotting
         # Absorption values
         plt.figure()

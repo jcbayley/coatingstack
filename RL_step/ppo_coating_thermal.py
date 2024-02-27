@@ -8,7 +8,7 @@ import gymnasium as gym
 import time
 import matplotlib.pyplot as plt
 import copy 
-from simple_environment import CoatingStack
+from thermal_noise_environment import CoatingStack
 from itertools import count
 from torch.distributions import Categorical, Normal
 from truncated_normal import TruncatedNormalDist
@@ -145,6 +145,22 @@ def plot_score(end_scores, max_scores, fname=None):
     ax.set_xlabel("episode")
     ax.set_ylabel("score")
     #ax.set_ylim([-10, max(max_scores) + 1])
+    ymin = np.nanmin(end_scores)
+    ymax = np.nanmax(end_scores)
+    if not np.isnan(ymin) and not np.isnan(ymax):
+        n_ymin = np.nan
+        n_ymax = np.nan
+        n_ignore = 100
+        if len(max_scores) > 3*n_ignore:
+            std = np.std(sorted(end_scores[n_ignore:-n_ignore]))
+            n_ymin = np.mean(sorted(end_scores[n_ignore:-n_ignore])) - 10*std
+            n_ymax = np.mean(sorted(max_scores[n_ignore:-n_ignore])) + 10*std
+
+        if not np.isnan(n_ymin) and np.isfinite(n_ymin):
+            ymin = n_ymin
+        if not np.isnan(n_ymax) and np.isfinite(n_ymax):
+            ymax = n_ymax
+        ax.set_ylim([ymin, ymax])
     ax.legend()
 
     if fname is not None:
@@ -171,6 +187,8 @@ def trainIters(
     actor_losses = []
     critic_losses = []
     all_mat_probs = []
+    all_rewards = []
+    all_returns = []
     fig, ax = plt.subplots()
     figval, axval = plt.subplots()
     figvals, axvals = plt.subplots()
@@ -190,14 +208,15 @@ def trainIters(
         entropy = 0
         advantages = []
         allreturns = []
-        for nrepeat in range(10):
+        for nrepeat in range(1):
             environment.reset()
             t_rewards = []
             t_masks = []
             for i in count():
                 #env.render()
                 state = torch.FloatTensor(state).to(device)
-                dist, value = actor(state.unsqueeze(0).unsqueeze(0)), critic(state.unsqueeze(0).unsqueeze(0))
+                value = critic(state.unsqueeze(0).unsqueeze(0))
+                dist = actor(state.unsqueeze(0).unsqueeze(0))
                 if i == 0:
                     mat_probs = dist[1].log_prob(torch.from_numpy(np.array([0,1,2])))
                     all_mat_probs.append(mat_probs.detach().cpu().numpy())
@@ -205,7 +224,6 @@ def trainIters(
                 thickness_change = dist[0].sample()
                 action = [thickness_change,material_change]
                 next_state, reward, done, new_value = environment.step(action, 0)
-
                 state_vals.append(new_value)
                 if new_value > max_end_value:
                     max_end_value = new_value
@@ -243,7 +261,7 @@ def trainIters(
             if final_state_value > max_state:
                 max_state = final_state_value   
             
-            rewards.append(np.mean(t_rewards))
+            rewards.append(t_rewards[-1])
             episode_end_scores.append(state_vals[-1])
             episode_max_scores.append(np.max(state_vals))
 
@@ -256,6 +274,9 @@ def trainIters(
 
         returns = torch.cat(allreturns).detach()
         values = torch.cat(values)
+
+        all_rewards.append(rewards[-1])
+        all_returns.append(returns[-1])
 
         advantage = returns - values.squeeze()
         #print("rsize: ", np.shape(returns), "vsize: ", np.shape(values))
@@ -299,6 +320,8 @@ def trainIters(
 
             plot_score(episode_end_scores, episode_max_scores, fname=os.path.join(root_dir, "running_scores.png"))
 
+            plot_score(all_returns, all_returns, fname=os.path.join(root_dir, "running_returns.png"))
+
             plot_score(episode_end_scores[-20:], episode_max_scores[-20:], fname=os.path.join(root_dir, "running_scores_end.png"))
 
 
@@ -316,7 +339,7 @@ def trainIters(
             figm.savefig(os.path.join(root_dir, "all_material_probs.png"))
 
         if iter % 100 == 0:
-            print(f"Episode: {iter}, score: {np.mean(rewards)}, {rewards[0]} ,{rewards[-1]}")
+            print(f"Episode: {iter}, score: {allreturns[-1].item()} ,{episode_end_scores[-1]}, {np.max(rewards)}")
 
             torch.save({
                 "actor_state_dict": actor.state_dict(),
@@ -325,6 +348,9 @@ def trainIters(
                 "critic_optimiser": optimiserC.state_dict()
             },
             os.path.join(root_dir, "checkpoint_model.pt"))
+
+            #with open("losses.txt", "w") as f:
+            #    np.savetxt(f, np.array([actor_losses, critic_losses, episode_max_scores]))
     #env.close()
 
     print("-------------------------------------")
@@ -416,8 +442,8 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
         #plotting.plot_coating(max_state, os.path.join(root_dir, f"coating_{i}.png"))
 
 
-    max_reward = np.max(final_state_values)
-    max_reward_ind = np.argmax(final_state_values)
+    max_reward = np.nanmax(final_state_values)
+    max_reward_ind = np.argmin(final_state_values - max_reward)
 
     max_state = final_states[max_reward_ind]
     print("-----------------------")
@@ -453,50 +479,54 @@ def test_model(actor,critic, environment, n_starts, n_layers=5, root_dir="./"):
     return final_states, final_rewards, final_values
 
 if __name__ == "__main__":
-    root_dir = "./actorcritic_output_ppo_multirun10_conv_4"
+    root_dir = "./thermalnoise_output_ppo_20layer"
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
 
-    n_layers = 20
-    min_thickness = 0.01
-    max_thickness = 1
+    n_layers = 10
+    min_thickness = 10
+    max_thickness = 3000
     load_model = False
 
     materials = {
         0:{
-                'name': 'air', 
-                'n'   : 1,
-                'alpha': np.NaN,
-                'beta': np.NaN,
-                'kappa': np.NaN,
-                'C': np.NaN,
-                'Y': np.NaN,
-                'prat': np.NaN,
-                'phiM': np.NaN
+            'name' : 'air', 
+            'n'    : 1,
+            'a'    : 0,
+            'alpha': np.NaN,
+            'beta' : np.NaN,
+            'kappa': np.NaN,
+            'C'    : np.NaN,
+            'Y'    : np.NaN,
+            'prat' : np.NaN,
+            'phiM' : np.NaN,
+            'k'    : 0
             },
         1: {
-            'name': 'SiO2',
-            'n': 1.44,
-            'a': 0,
+            'name' : 'SiO2',
+            'n'    : 1.44,
+            'a'    : 0,
             'alpha': 0.51e-6,
-            'beta': 8e-6,
+            'beta' : 8e-6,
             'kappa': 1.38,
-            'C': 1.64e6,
-            'Y': 72e9,
-            'prat': 0.17,
-            'phiM': 4.6e-5
+            'C'    : 1.64e6,
+            'Y'    : 72e9,
+            'prat' : 0.17,
+            'phiM' : 4.6e-5,
+            'k'    : 1
         },
         2: {
-            'name': 'ta2o5',
-            'n': 2.07,
-            'a': 2,
+            'name' : 'ta2o5',
+            'n'    : 2.07,
+            'a'    : 2,
             'alpha': 3.6e-6,
-            'beta': 14e-6,
+            'beta' : 14e-6,
             'kappa': 33,
-            'C': 2.1e6,
-            'Y': 140e9,
-            'prat': 0.23,
-            'phiM': 2.44e-4
+            'C'    : 2.1e6,
+            'Y'    : 140e9,
+            'prat' : 0.23,
+            'phiM' : 2.44e-4,
+            'k'    :1
         },
     }
 
@@ -506,15 +536,14 @@ if __name__ == "__main__":
         n_layers, 
         min_thickness, 
         max_thickness, 
-        materials, 
-        thickness_options=thickness_options)
+        materials)
     
-    num_iterations = 50000
+    num_iterations = 30000
 
     device = "cpu"
 
-    actor = Actor(env.state_space_size, env.n_materials, hidden_size=128, n_hidden=4, thickness_range=(min_thickness, max_thickness)).to(device)
-    critic = Critic(env.state_space_size, env.n_materials, hidden_size=128, n_hidden=4).to(device)
+    actor = Actor(env.state_space_size, env.n_materials, hidden_size=32, n_hidden=2, thickness_range=(min_thickness, max_thickness)).to(device)
+    critic = Critic(env.state_space_size, env.n_materials, hidden_size=32, n_hidden=2).to(device)
 
     if load_model:
         model_check = torch.load(os.path.join(root_dir, "checkpoint_model.pt"))
@@ -523,8 +552,9 @@ if __name__ == "__main__":
     #actor = Actor(env.state_space_size, env.n_actions).to(device)
     #critic = Critic(env.state_space_size, env.n_actions).to(device)
 
-    optimiserA = optim.AdamW(actor.parameters(), lr=1e-5, weight_decay=0.1)
-    optimiserC = optim.AdamW(critic.parameters(), lr=3e-5, weight_decay=0.1)
+    learning_rate = 1e-5
+    optimiserA = optim.AdamW(actor.parameters(), lr=learning_rate, weight_decay=0.0)
+    optimiserC = optim.AdamW(critic.parameters(), lr=3*learning_rate, weight_decay=0.0)
     
     trainIters(
         actor, 
@@ -534,10 +564,11 @@ if __name__ == "__main__":
         optimiserC=optimiserC, 
         n_iters=num_iterations, 
         device=device,
-        root_dir=root_dir)
+        root_dir=root_dir,
+        ppo_loss=True)
     
     
-    n_examples= 500
+    n_examples= 10
     with torch.no_grad():
         final_states, final_rewards, final_values = test_model(
             actor,

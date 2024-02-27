@@ -38,11 +38,16 @@ class CoatingStack():
 
         # state space size is index for each material (onehot encoded) plus thickness of each material
         self.state_space_size = self.max_layers*self.n_materials + self.max_layers
+        self.state_space_shape = (self.max_layers, self.n_materials + 1)
 
         self.length = 0
         self.current_state = self.sample_state_space()
         self.current_index = 0
         self.previous_material = -1
+
+        mmax = np.max([m["n"] for k,m in self.materials.items()])
+        mmin = np.min([m["n"] for k,m in self.materials.items()])
+        self.max_material_ratio = mmax/mmin
 
     def reset(self,):
         """reset the state space and length
@@ -124,9 +129,9 @@ class CoatingStack():
         for i, layer in enumerate(state):
             material_ind = np.argmax(layer[1:])
             material = self.materials[material_ind]
-            m_scaled += -np.abs((0.25 - state[i][0]))
+            m_scaled += np.clip(-np.abs((0.25 - state[i][0])**2), -1, 1)
             if last_material is not None:
-                m_scaled += material["n"]/last_material["n"]
+                m_scaled += (material["n"]/last_material["n"])/self.max_material_ratio
             last_material = material
     
         return m_scaled

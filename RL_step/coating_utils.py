@@ -44,12 +44,12 @@ def getCoatRefl2(nIn, nOut, nLayer, dOpt):
     return rCoat, dcdp, rbar, r
 
 
-def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
+def getCoatAbsorption(light_wavelength, dOpt, aLayer, nLayer, rbar, r):
     """
     Returns coating absorption as a function of depth.
 
     Parameters:
-    - lambda_ : wavelength
+    - light_wavelength : wavelength
     - dOpt : optical thickness/lambda of each layer
              = geometrical thickness * refractive index/lambda
     - aLayer : absorption per unit length in each layer
@@ -73,7 +73,7 @@ def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
     rho = (1 + np.abs(rbar)**2) + 2 * (np.sin(phi) / phi) * np.real(rbar * np.exp(1j * phi))
     
     # Geometrical thickness of each layer
-    dGeo = lambda_ * dOpt / nLayer
+    dGeo = light_wavelength * dOpt / nLayer
     
     # Compute power weighting for each layer
     absLayer = aLayer * rho * powerLayer * dGeo
@@ -84,13 +84,13 @@ def getCoatAbsorption(lambda_, dOpt, aLayer, nLayer, rbar, r):
     return absCoat, absLayer, powerLayer, rho
 
 
-def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, materialLayer, dOpt, dcdp):
+def getCoatNoise2(f, light_wavelength, wBeam, Temp, materialParams, materialSub, materialLayer, dOpt, dcdp):
     """
     Returns coating noise as a function of depth.
 
     Parameters:
     - f : frequency
-    - lambda_ : wavelength
+    - light_wavelength : wavelength
     - wBeam : beam width
     - Temp : temperatur
     - materialParams : dictionary containing material properties
@@ -139,7 +139,7 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
         phiN[n] = materialParams[mat]['phiM']
     
     # Geometrical thickness of each layer and total
-    dGeo = lambda_ * dOpt / nN
+    dGeo = light_wavelength * dOpt / nN
     dCoat = np.sum(dGeo)
     
     # Brownian
@@ -160,10 +160,10 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
     SteZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
     
     # Thermo-refractive
-    StrZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * np.sum(betaBar * lambda_)**2
+    StrZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * np.sum(betaBar * light_wavelength)**2
     
     # Total thermo-optic
-    StoZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - np.sum(betaBar * lambda_) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
+    StoZ = (4 * kBT * Temp / (np.pi * wBeam**2 * np.sqrt(2 * kappaSub * cSub * w))) * (np.sum(alphaBar * dCoat) - np.sum(betaBar * light_wavelength) - alphaBarSub * np.sum(dGeo * cN) / cSub)**2
     
     return SbrZ, StoZ, SteZ, StrZ, brLayer
 
@@ -172,14 +172,14 @@ def getCoatNoise2(f, lambda_, wBeam, Temp, materialParams, materialSub, material
 def re_integrand(
     state,
     EFI,
-    lambda_,
+    light_wavelength,
     num_points=30000,
     all_materials: dict = {}):
     ### set up a function to integrate over the total elecric feild intensity as a function of depth 
     ### t
     #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
     #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
-    #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
+    #light_wavelength:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
     #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
     #Returns
     #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
@@ -191,13 +191,13 @@ def re_integrand(
     # Calculate layer thicknesses
     #if np.shape(materialLayer)[0] != 1:
         
-    #layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
+    #layer_thicknesses = [light_wavelength / (4 * materialParams[mat]['n']) for mat in materialLayer]
     #cumulative_thickness = np.cumsum(layer_thicknesses)
         
     
     #else: 
     #    cumulative_thickness = layer_thicknesses
-    #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
+    #    layer_thicknesses = light_wavelength / (4 * materialParams[materialLayer[0]]['n'])
 
     # Generate depth points linearly spaced across each layer
     layer_thicknesses = np.zeros(len(state))
@@ -206,7 +206,7 @@ def re_integrand(
         thickness = layer[0]
         mat = np.argmax(layer[1:]) + 1
         material = all_materials[mat]
-        layer_thicknesses[i] = lambda_ / (4 * material['n'])
+        layer_thicknesses[i] = light_wavelength / (4 * material['n'])
         cumulative_thickness[:i+1] += layer_thicknesses[i]
         start_depth = cumulative_thickness[i] - thickness
         end_depth = cumulative_thickness[i]
@@ -234,12 +234,12 @@ def re_integrand(
 
     return EFI/stack_info_array[1]
 
-def integrand(EFI,lambda_,materialLayer,materialParams,num_points=30000):
+def integrand(EFI,light_wavelength,materialLayer,materialParams,num_points=30000):
     ### set up a function to integrate over the total elecric feild intensity as a function of depth 
     ### t
     #materialLayer:         numpy.ndarray - An array of integers where each element represents the material type for each layer in the coating stack.
     #materialParams:        dict - A dictionary containing the refractive indices for each material type. The keys are material types (as referenced in materialLayer), and each key maps to another dictionary with a key 'n' for refractive index.
-    #lambda_:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
+    #light_wavelength:               float - The wavelength of light in nanometers used for calculating the layer thicknesses.
     #num_points:            int - The total number of points to represent in the array, distributed across the entire stack.
     #Returns
     #EFI/refractiveindex    numpy.ndarray - Electric feild intensity normallised to the refractive index at each point in the coating stack 
@@ -251,13 +251,13 @@ def integrand(EFI,lambda_,materialLayer,materialParams,num_points=30000):
     # Calculate layer thicknesses
     #if np.shape(materialLayer)[0] != 1:
         
-    layer_thicknesses = [lambda_ / (4 * materialParams[mat]['n']) for mat in materialLayer]
+    layer_thicknesses = [light_wavelength / (4 * materialParams[mat]['n']) for mat in materialLayer]
     cumulative_thickness = np.cumsum(layer_thicknesses)
         
     
     #else: 
     #    cumulative_thickness = layer_thicknesses
-    #    layer_thicknesses = lambda_ / (4 * materialParams[materialLayer[0]]['n'])
+    #    layer_thicknesses = light_wavelength / (4 * materialParams[materialLayer[0]]['n'])
         
 
     # Generate depth points linearly spaced across each layer
@@ -292,15 +292,16 @@ def integrand(EFI,lambda_,materialLayer,materialParams,num_points=30000):
 def merit_function(
         state,
         all_materials,
-        air_material,
         w_R=1.0, 
         w_T=1.0, 
         w_E=1.0, 
         w_D=1.0,
         wBeam = 0.062,              # 6cm beam for aLIGO 
-        laser_wavelength = 1064e-9,          # laser wavelength
+        light_wavelength = 1064e-9,          # laser wavelength
         Temp = 293,                 # temperature - Room temperature 
         frequency = 100.0,                     # frequencies for plotting
+        substrate_index = 1,
+        air_index = 0
     ):
     #set up with default inputs to match aLIGO for testing = this should be modified to allow for varying inputs. 
     
@@ -313,36 +314,36 @@ def merit_function(
         
     #n_indicies = [n1, n2] * num21 + [1, 2] * num34
     
-    layer_materials = []
-    layer_thicknesses = np.zeros(len(state))
-    for i,layer in enumerate(state):
-        layer_thicknesses[i] = layer[0]
-        mat = np.argmax(layer[1:]) + 1
-        layer_materials.append(mat)
-    
-    layer_materials = np.array(layer_materials, dtype=np.int32)
-    new_all_materials = copy.copy(all_materials)
-    new_all_materials.update(air_material)
+    # convert current state to format for EFI functions
 
+    layer_thicknesses = state[:,0]
+    layer_material_inds = np.argmax(state[:,1:], axis=1) 
+    
+    #layer_materials = np.array(layer_material_inds, dtype=np.int32)
+    #new_all_materials.update(air_material)
+    #new_all_materials = copy.copy(all_materials)
+    new_all_materials = all_materials
     #print(new_all_materials.keys())
     num_points = 200
 
     E_total, _, PhysicalThickness = CalculateEFI_tmm(
-        layer_thicknesses,
-        materialLayer=layer_materials, 
-        materialParams=new_all_materials,
-        lambda_=laser_wavelength ,
+        layer_thicknesses = layer_thicknesses,
+        layer_materials = layer_material_inds, 
+        material_parameters = new_all_materials,
+        light_wavelength=light_wavelength ,
         t_air=500,
         polarisation='p' ,
         plots=False,
-        num_points=num_points)
+        num_points=num_points,
+        air_index = air_index,
+        substrate_index=substrate_index)
     
     ThermalNoise= getCoatingThermalNoise(
         layer_thicknesses, 
-        layer_materials, 
+        layer_material_inds, 
         new_all_materials, 
-        materialSub=1, 
-        lambda_=laser_wavelength, 
+        substrate_index=1, 
+        light_wavelength=light_wavelength, 
         f=frequency, 
         wBeam=wBeam, 
         Temp=Temp,
@@ -366,7 +367,7 @@ def merit_function(
     # Total Thickness
     D = PhysicalThickness[-1]
     
-    normallised_EFI = integrand(E_total,laser_wavelength,layer_materials,all_materials,num_points=num_points)
+    normallised_EFI = integrand(E_total,light_wavelength,layer_material_inds,all_materials,num_points=num_points)
     #normallised_EFI = integrand(state,E_total,laser_wavelength,num_points=30000)
     
     depths = np.linspace(0, D, len(normallised_EFI))
@@ -374,14 +375,15 @@ def merit_function(
     # Perform the integration using the trapezoidal rule
     E_integrated = np.trapz(normallised_EFI, depths)
     
-    n_layer = np.array([all_materials[mat]["n"] for mat in layer_materials])
+    n_layer = np.array([all_materials[mat]["n"] for mat in layer_material_inds])
     
-    nSub = 1 
+    nSub = all_materials[1]["n"]
+    nAir = all_materials[0]["n"]
     
     # Reflectivity
-    R, dcdp, rbar, r = getCoatRefl2(1, nSub, n_layer, layer_thicknesses)
+    R, dcdp, rbar, r = getCoatRefl2(nAir, nSub, n_layer, layer_thicknesses)
     
-    R = np.real(R)
+    R = np.abs(np.real(R))
 
     """
     # Clear the previous output (the number of spaces should cover the previous line)
@@ -404,7 +406,7 @@ def merit_function(
     
     M = w_R * (1/R) + w_T * ThermalNoise_Total + w_E * (1/E_integrated) + w_D * D
     
-    M_scaled = 1/(R_scaled + CTN_scaled + EFI_scaled + thick_scaled)
+    M_scaled = 1./(R_scaled + CTN_scaled + EFI_scaled + thick_scaled)
     
     #return M_scaled, R_scaled , CTN_scaled , EFI_scaled , thick_scaled
-    return M, M_scaled,R, ThermalNoise_Total, E_integrated,D
+    return M, M_scaled, R, ThermalNoise_Total, E_integrated,D
